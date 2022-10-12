@@ -171,8 +171,8 @@ func (c *Context) Export(job *work.Job) error {
 
 Then in the web UI, you'll see the status of the worker:
 
-| Name | Arguments | Started At | Check-in At | Check-in |
-| --- | --- | --- | --- | --- |
+| Name   | Arguments           | Started At          | Check-in At         | Check-in |
+| ------ | ------------------- | ------------------- | ------------------- | -------- |
 | export | {"account_id": 123} | 2016/07/09 04:16:51 | 2016/07/09 05:03:13 | i=335000 |
 
 ### Scheduled Jobs
@@ -199,6 +199,8 @@ job, err = enqueuer.EnqueueUniqueIn("clear_cache", 300, work.Q{"object_id_": "78
 ### Periodic Enqueueing (Cron)
 
 You can periodically enqueue jobs on your gocraft/work cluster using your worker pool. The [scheduling specification](https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format) uses a Cron syntax where the fields represent seconds, minutes, hours, day of the month, month, and week of the day, respectively. Even if you have multiple worker pools on different machines, they'll all coordinate and only enqueue your job once.
+
+**NOTE:** Use only the asterisk format as in the example below, not @every. In this case, each job has a predictable byte format and will be deduplicated.
 
 ```go
 pool := work.NewWorkerPool(Context{}, 10, "my_app_namespace", redisPool)
@@ -330,12 +332,12 @@ You'll see a view that looks like this:
 
 The benches folder contains various benchmark code. In each case, we enqueue 100k jobs across 5 queues. The jobs are almost no-op jobs: they simply increment an atomic counter. We then measure the rate of change of the counter to obtain our measurement.
 
-| Library | Speed |
-| --- | --- |
-| [gocraft/work](https://www.github.com/gocraft/work) | **20944 jobs/s** |
-| [jrallison/go-workers](https://www.github.com/jrallison/go-workers) | 19945 jobs/s |
-| [benmanns/goworker](https://www.github.com/benmanns/goworker) | 10328.5 jobs/s |
-| [albrow/jobs](https://www.github.com/albrow/jobs) | 40 jobs/s |
+| Library                                                             | Speed            |
+| ------------------------------------------------------------------- | ---------------- |
+| [gocraft/work](https://www.github.com/gocraft/work)                 | **20944 jobs/s** |
+| [jrallison/go-workers](https://www.github.com/jrallison/go-workers) | 19945 jobs/s     |
+| [benmanns/goworker](https://www.github.com/benmanns/goworker)       | 10328.5 jobs/s   |
+| [albrow/jobs](https://www.github.com/albrow/jobs)                   | 40 jobs/s        |
 
 
 ## gocraft
