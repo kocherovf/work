@@ -3,12 +3,14 @@ package work
 import (
 	crand "crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
+	"go.uber.org/multierr"
 )
 
 const (
@@ -92,6 +94,15 @@ func (r *deadPoolReaper) reap() (err error) {
 		err = r.releaseLock(lockValue)
 	}()
 
+	rErr := r.reapDeadPools()
+	cErr := r.clearUnknownPools()
+
+	return multierr.Combine(rErr, cErr)
+}
+
+// reapDeadPools collects the IDs of expired heartbeat pools and releases the
+// associated resources.
+func (r *deadPoolReaper) reapDeadPools() error {
 	deadPoolIDs, err := r.findDeadPools()
 	if err != nil {
 		return err
@@ -124,6 +135,27 @@ func (r *deadPoolReaper) reap() (err error) {
 
 		// Remove dead pool from worker pools set
 		if _, err = conn.Do("SREM", redisKeyWorkerPools(r.namespace), deadPoolID); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// clearUnknownPools enumerates the lock_info keys, collects pool IDs that are
+// not in the worker_pools set, and releases associated locks.
+func (r *deadPoolReaper) clearUnknownPools() error {
+	unknownPools, err := r.getUnknownPools()
+	if err != nil {
+		return err
+	}
+
+	for poolID, jobTypes := range unknownPools {
+		if err = r.requeueInProgressJobs(poolID, jobTypes); err != nil {
+			return err
+		}
+
+		if err = r.cleanStaleLockInfo(poolID, jobTypes); err != nil {
 			return err
 		}
 	}
@@ -205,6 +237,45 @@ func (r *deadPoolReaper) findDeadPools() (map[string][]string, error) {
 	}
 
 	return deadPools, nil
+}
+
+// getUnknownPools returns the IDs of the unknown pools and associated job types
+// found in the lock_info keys.
+func (r *deadPoolReaper) getUnknownPools() (map[string][]string, error) {
+	scriptArgs := make([]interface{}, 0, len(r.curJobTypes)+2) // +2 for keys count and pools key
+	scriptArgs = append(scriptArgs, len(r.curJobTypes)+1)      // +1 for pools key
+	scriptArgs = append(scriptArgs, redisKeyWorkerPools(r.namespace))
+
+	for _, j := range r.curJobTypes {
+		scriptArgs = append(scriptArgs, redisKeyJobsLockInfo(r.namespace, j))
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	data, err := redis.Bytes(redisGetUnknownPoolsScript.Do(conn, scriptArgs...))
+	if err != nil {
+		return nil, err
+	}
+
+	var pools map[string][]string
+
+	if err := json.Unmarshal(data, &pools); err != nil {
+		return nil, err
+	}
+
+	// convert lock_info keys to job types
+	for pool, keys := range pools {
+		jobs := make([]string, 0, len(keys))
+
+		for _, k := range keys {
+			jobs = append(jobs, redisJobNameFromLockInfoKey(r.namespace, k))
+		}
+
+		pools[pool] = jobs
+	}
+
+	return pools, nil
 }
 
 // acquireLock acquires lock with a value and an expiration time for reap period.
