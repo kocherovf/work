@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/gomodule/redigo/redis"
 )
@@ -28,6 +29,10 @@ func redisKeyJobsPrefix(namespace string) string {
 
 func redisKeyJobs(namespace, jobName string) string {
 	return redisKeyJobsPrefix(namespace) + jobName
+}
+
+func redisJobNameFromKey(namespace, key string) string {
+	return strings.TrimPrefix(key, redisKeyJobsPrefix(namespace))
 }
 
 func redisKeyJobsInProgress(namespace, poolID, jobName string) string {
@@ -68,6 +73,10 @@ func redisKeyJobsLock(namespace, jobName string) string {
 
 func redisKeyJobsLockInfo(namespace, jobName string) string {
 	return redisKeyJobs(namespace, jobName) + ":lock_info"
+}
+
+func redisJobNameFromLockInfoKey(namespace, key string) string {
+	return redisJobNameFromKey(namespace, strings.TrimSuffix(key, ":lock_info"))
 }
 
 func redisKeyJobsConcurrency(namespace, jobName string) string {
@@ -432,4 +441,36 @@ if redis.call("GET", KEYS[1]) == ARGV[1] then
 else
   return 0
 end
+`)
+
+// Used by the reaper to get unknown pool IDs and associated job lock_info keys.
+//
+// KEYS[1] = worker pools key
+// KEYS[2...] = known job's lock info
+// Returns: {"3a8b74d991320d6283bb4363": ["ns:jobs:job1:lock_info", "ns:jobs:job2:lock_info"]}
+var redisGetUnknownPoolsScript = redis.NewScript(-1, `
+local poolsKey = KEYS[1]
+local unknownPools = {}
+
+for i=2,#KEYS do
+    local lockInfoKey = KEYS[i]
+    local poolIDs = redis.call('hkeys', lockInfoKey)
+
+    for j=1,#poolIDs do
+        local poolID = poolIDs[j]
+        local isMemberOfPools = redis.call('sismember', poolsKey, poolID) == 1
+
+        if not isMemberOfPools then
+            local pool = unknownPools[poolID]
+            if pool == nil then
+                pool = {}
+            end
+
+            table.insert(pool, lockInfoKey)
+            unknownPools[poolID] = pool
+        end
+    end
+end
+
+return cjson.encode(unknownPools)
 `)

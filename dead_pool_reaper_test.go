@@ -434,3 +434,120 @@ func TestReaperLock(t *testing.T) {
 	_, err = redis.String(conn.Do("GET", redisKeyReaperLock(ns)))
 	assert.Error(t, err)
 }
+
+func TestDeadPoolReaperGetUnknownPools(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	cleanKeyspace(ns, pool)
+
+	workerPoolsKey := redisKeyWorkerPools(ns)
+	workerPoolID1, workerPoolID2, workerPoolID3 := "1", "2", "3"
+
+	job1, job2 := "type1", "type2"
+	jobNames := []string{job1, job2}
+	lockInfo1, lockInfo2 := redisKeyJobsLockInfo(ns, job1), redisKeyJobsLockInfo(ns, job2)
+
+	conn := pool.Get()
+	defer conn.Close()
+
+	// Create redis data
+	var err error
+	err = conn.Send("SADD", workerPoolsKey, workerPoolID1)
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo1,
+		workerPoolID1, 1, // workerPoolID1 holds 1 lock on job1
+		workerPoolID2, 0, // unknown workerPoolID2 holds 0 locks on job1
+		workerPoolID3, 2, // unknown workerPoolID3 holds 2 locks on job1
+	)
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo2,
+		workerPoolID1, 0, // workerPoolID1 holds 0 lock on job2
+		workerPoolID2, 1, // unknown workerPoolID2 holds 1 locks on job2
+		workerPoolID3, 1, // unknown workerPoolID3 holds 1 locks on job2
+	)
+	assert.NoError(t, err)
+
+	assert.NoError(t, conn.Flush())
+
+	// Run test
+	reaper := newDeadPoolReaper(ns, pool, jobNames)
+	unknownPools, err := reaper.getUnknownPools()
+	assert.NoError(t, err)
+	assert.Equal(t, map[string][]string{"2": {"type1", "type2"}, "3": {"type1", "type2"}}, unknownPools)
+}
+
+func TestDeadPoolReaperClearUnknownPool(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	cleanKeyspace(ns, pool)
+
+	workerPoolsKey := redisKeyWorkerPools(ns)
+	workerPoolID1, workerPoolID2, workerPoolID3 := "1", "2", "3"
+
+	job1, job2 := "type1", "type2"
+	jobNames := []string{job1, job2}
+	lock1, lock2 := redisKeyJobsLock(ns, job1), redisKeyJobsLock(ns, job2)
+	lockInfo1, lockInfo2 := redisKeyJobsLockInfo(ns, job1), redisKeyJobsLockInfo(ns, job2)
+
+	conn := pool.Get()
+	defer conn.Close()
+
+	// Create redis data
+	var err error
+	err = conn.Send("SADD", workerPoolsKey, workerPoolID1)
+	assert.NoError(t, err)
+
+	err = conn.Send("SET", lock1, 2)
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo1,
+		workerPoolID1, 1, // workerPoolID1 holds 1 lock on job1
+		workerPoolID2, 0, // unknown workerPoolID2 holds 0 locks on job1
+		workerPoolID3, 1, // unknown workerPoolID3 holds 2 locks on job1
+	)
+	assert.NoError(t, err)
+
+	err = conn.Send("LPUSH", redisKeyJobsInProgress(ns, workerPoolID1, job1), "foo")
+	assert.NoError(t, err)
+
+	err = conn.Send("LPUSH", redisKeyJobsInProgress(ns, workerPoolID3, job1), "bar")
+	assert.NoError(t, err)
+
+	err = conn.Send("SET", lock2, 2)
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo2,
+		workerPoolID1, 0, // workerPoolID1 holds 0 lock on job2
+		workerPoolID2, 2, // unknown workerPoolID2 holds 1 locks on job2
+		workerPoolID3, 0, // unknown workerPoolID3 holds 1 locks on job2
+	)
+	assert.NoError(t, err)
+
+	err = conn.Send("LPUSH", redisKeyJobsInProgress(ns, workerPoolID2, job2), "bar", "baz")
+	assert.NoError(t, err)
+
+	assert.NoError(t, conn.Flush())
+
+	// Run test
+	reaper := newDeadPoolReaper(ns, pool, jobNames)
+	err = reaper.clearUnknownPools()
+	assert.NoError(t, err)
+
+	nLock1, err := redis.Int(conn.Do("GET", lock1))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, nLock1)
+
+	nLock2, err := redis.Int(conn.Do("GET", lock2))
+	assert.NoError(t, err)
+	assert.Equal(t, 0, nLock2)
+
+	nLockInfo1, err := redis.StringMap(conn.Do("HGETALL", lockInfo1))
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{workerPoolID1: "1"}, nLockInfo1)
+
+	nLockInfo2, err := redis.StringMap(conn.Do("HGETALL", lockInfo2))
+	assert.NoError(t, err)
+	assert.Equal(t, map[string]string{workerPoolID1: "0"}, nLockInfo2)
+}
