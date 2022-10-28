@@ -21,6 +21,9 @@ type Job struct {
 	LastErr  string `json:"err,omitempty"`
 	FailedAt int64  `json:"failed_at,omitempty"`
 
+	// StartingDeadline is used to skip periodic jobs that are no longer relevant.
+	StartingDeadline int64 `json:"d,omitempty"`
+
 	rawJSON      []byte
 	dequeuedFrom []byte
 	inProgQueue  []byte

@@ -35,27 +35,28 @@ func TestPeriodicEnqueuer(t *testing.T) {
 		name         string
 		id           string
 		scheduledFor int64
+		deadline     int64
 	}{
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359472", scheduledFor: 1468359472},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359478", scheduledFor: 1468359478},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359480", scheduledFor: 1468359480},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359483", scheduledFor: 1468359483},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359509", scheduledFor: 1468359509},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359532", scheduledFor: 1468359532},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359538", scheduledFor: 1468359538},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359540", scheduledFor: 1468359540},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359543", scheduledFor: 1468359543},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359569", scheduledFor: 1468359569},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359592", scheduledFor: 1468359592},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359598", scheduledFor: 1468359598},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359600", scheduledFor: 1468359600},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359603", scheduledFor: 1468359603},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359629", scheduledFor: 1468359629},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359652", scheduledFor: 1468359652},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359658", scheduledFor: 1468359658},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359660", scheduledFor: 1468359660},
-		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359663", scheduledFor: 1468359663},
-		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359689", scheduledFor: 1468359689},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359472", scheduledFor: 1468359472, deadline: 1468359483},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359478", scheduledFor: 1468359478, deadline: 1468359480},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359480", scheduledFor: 1468359480, deadline: 1468359509},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359483", scheduledFor: 1468359483, deadline: 1468359532},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359509", scheduledFor: 1468359509, deadline: 1468359538},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359532", scheduledFor: 1468359532, deadline: 1468359543},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359538", scheduledFor: 1468359538, deadline: 1468359540},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359540", scheduledFor: 1468359540, deadline: 1468359569},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359543", scheduledFor: 1468359543, deadline: 1468359592},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359569", scheduledFor: 1468359569, deadline: 1468359598},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359592", scheduledFor: 1468359592, deadline: 1468359603},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359598", scheduledFor: 1468359598, deadline: 1468359600},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359600", scheduledFor: 1468359600, deadline: 1468359629},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359603", scheduledFor: 1468359603, deadline: 1468359652},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359629", scheduledFor: 1468359629, deadline: 1468359658},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359652", scheduledFor: 1468359652, deadline: 1468359663},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359658", scheduledFor: 1468359658, deadline: 1468359660},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359660", scheduledFor: 1468359660, deadline: 1468359689},
+		{name: "bar", id: "periodic:bar:3/49 * * * * *:1468359663", scheduledFor: 1468359663, deadline: 1468359712},
+		{name: "foo", id: "periodic:foo:0/29 * * * * *:1468359689", scheduledFor: 1468359689, deadline: 1468359718},
 	}
 
 	for i, e := range expected {
@@ -65,6 +66,7 @@ func TestPeriodicEnqueuer(t *testing.T) {
 		assert.Equal(t, e.name, scheduledJobs[i].Name)
 		assert.Equal(t, e.id, scheduledJobs[i].ID)
 		assert.Equal(t, e.scheduledFor, scheduledJobs[i].RunAt)
+		assert.Equal(t, e.deadline, scheduledJobs[i].Job.StartingDeadline)
 	}
 
 	conn := pool.Get()
