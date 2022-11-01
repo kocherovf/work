@@ -3,6 +3,7 @@ package work
 import (
 	"testing"
 
+	"github.com/robfig/cron"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -78,4 +79,36 @@ func TestRequeueUnknown(t *testing.T) {
 	assert.Equal(t, nowish, rank)
 	assert.Equal(t, nowish, job.FailedAt)
 	assert.Equal(t, "unknown job when requeueing", job.LastErr)
+}
+
+func TestRequeuePeriodic(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	cleanKeyspace(ns, pool)
+
+	jobName := "clean"
+	jobSpec := "*/1 * * * * *"
+	shedule, err := cron.Parse(jobSpec)
+	assert.NoError(t, err)
+
+	jobs := []*periodicJob{
+		{jobName: jobName, spec: jobSpec, schedule: shedule},
+	}
+
+	enq := newPeriodicEnqueuer(ns, pool, jobs)
+	enq.start()
+	enq.stop()
+
+	// 300 seconds have passed
+	tMock := nowEpochSeconds() + 300
+	setNowEpochSecondsMock(tMock)
+	defer resetNowEpochSecondsMock()
+
+	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{jobName})
+	re.start()
+	re.drain()
+	re.stop()
+
+	llen := listSize(pool, redisKeyJobs(ns, jobName))
+	assert.Equal(t, int64(0), llen)
 }
