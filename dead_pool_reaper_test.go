@@ -130,7 +130,7 @@ func TestDeadPoolReaperNoHeartbeat(t *testing.T) {
 	reaper := newDeadPoolReaper(ns, pool, []string{"type1"})
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]string{"1": {}, "2": {}, "3": {}}, deadPools)
+	assert.Equal(t, map[string][]string{"1": nil, "2": nil, "3": nil}, deadPools)
 
 	// Test requeueing jobs
 	_, err = conn.Do("lpush", redisKeyJobsInProgress(ns, "2", "type1"), "foo")
@@ -387,7 +387,7 @@ func TestDeadPoolReaperTakeDeadPools(t *testing.T) {
 	reaper := newDeadPoolReaper(ns, pool, []string{})
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
-	assert.Equal(t, map[string][]string{"2": {"type1", "type2"}, "3": {}}, deadPools)
+	assert.Equal(t, map[string][]string{"2": {"type1", "type2"}, "3": nil}, deadPools)
 }
 
 func TestReaperLock(t *testing.T) {

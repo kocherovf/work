@@ -397,54 +397,6 @@ end
 return 'dup'
 `
 
-// Used by the reaper to get staled pool IDs and associated jobs.
-//
-// KEYS[1] = worker pools key
-// ARGV[1] = deadTime in seconds
-// ARGV[2] = now unix timestamp
-// Returns: ["pool1", "job1,job2", "pool2", "job1", "pool3", ""]
-var redisTakeDeadPoolsScript = redis.NewScript(1, `
-local poolsKey = KEYS[1]
-local deadTime = tonumber(ARGV[1])
-local timeNow = tonumber(ARGV[2])
-
-local heartbeatKey, heartbeatAt, jobTypesList, pool
-local deadPools = {}
-
-local pools = redis.call('smembers', poolsKey)
-
-for i=1,#pools do
-  pool = pools[i]
-
-  heartbeatKey = poolsKey .. ':' .. pool
-  heartbeatAt = tonumber(redis.call('hget', heartbeatKey, 'heartbeat_at'))
-
-  if heartbeatAt then
-    if (heartbeatAt + deadTime < timeNow) then
-      jobTypesList = redis.call('hget', heartbeatKey, 'job_names')
-
-      if jobTypesList then
-        table.insert(deadPools, pool)
-        table.insert(deadPools, jobTypesList)
-
-      -- The current implementation does not consider stale pool heartbeat with
-      -- no jobs to be dead pools.
-      -- else
-      --   table.insert(deadPools, pool)
-      --   table.insert(deadPools, '')
-      end
-
-    end
-  else
-    table.insert(deadPools, pool)
-    table.insert(deadPools, '')
-  end
-
-end
-
-return deadPools
-`)
-
 // Used by the reaper to release acquired lock.
 //
 // KEYS[1] = reaper lock key
