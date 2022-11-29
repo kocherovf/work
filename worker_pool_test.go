@@ -2,19 +2,26 @@ package work
 
 import (
 	"bytes"
+	"context"
 	"fmt"
+	"log"
 	"reflect"
 	"testing"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 type tstCtx struct {
-	a int
 	bytes.Buffer
 }
+
+func (*tstCtx) genericHandler(*Job) error        { return nil }
+func (*tstCtx) genericContextHandler(*Job) error { return nil }
 
 func (c *tstCtx) record(s string) {
 	_, _ = c.WriteString(s)
@@ -28,6 +35,7 @@ func TestWorkerPoolHandlerValidations(t *testing.T) {
 		good bool
 	}{
 		{func(j *Job) error { return nil }, true},
+		{func(ctx context.Context, j *Job) error { return nil }, true},
 		{func(c *tstCtx, j *Job) error { return nil }, true},
 		{func(c *tstCtx, j *Job) {}, false},
 		{func(c *tstCtx, j *Job) string { return "" }, false},
@@ -52,6 +60,7 @@ func TestWorkerPoolMiddlewareValidations(t *testing.T) {
 		good bool
 	}{
 		{func(j *Job, n NextMiddlewareFunc) error { return nil }, true},
+		{func(ctx context.Context, j *Job, n NextMiddlewareFunc) error { return nil }, true},
 		{func(c *tstCtx, j *Job, n NextMiddlewareFunc) error { return nil }, true},
 		{func(c *tstCtx, j *Job) error { return nil }, false},
 		{func(c *tstCtx, j *Job, n NextMiddlewareFunc) {}, false},
@@ -206,6 +215,44 @@ func TestWorkerPoolPauseSingleThreadedJobs(t *testing.T) {
 	assert.EqualValues(t, 0, hgetInt64(pool, redisKeyJobsLockInfo(ns, job1), wp.workerPoolID))
 }
 
+func TestWorkerPoolTracing(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	jobName := "jobName"
+	cleanKeyspace(ns, pool)
+
+	exp := tracetest.NewInMemoryExporter()
+	tp := trace.NewTracerProvider(trace.WithSyncer(exp))
+
+	ctx, span := tp.Tracer("").Start(context.Background(), "enqueue")
+	span.End()
+
+	Logger = log.Default()
+
+	enqueuer := NewEnqueuer(ns, pool)
+
+	_, err := enqueuer.EnqueueContext(ctx, jobName, Q{"a": "b"})
+	require.NoError(t, err)
+
+	wp := NewWorkerPool(struct{}{}, 2, ns, pool)
+
+	wp.Job(jobName, func(ctx context.Context, j *Job) error {
+		_, span := tp.Tracer("lib").Start(ctx, "exec")
+		defer span.End()
+		return nil
+	})
+
+	wp.Start()
+	wp.Drain()
+	wp.Stop()
+
+	finishedSpans := exp.GetSpans()
+	require.Len(t, finishedSpans, 2)
+	assert.Equal(t, "enqueue", finishedSpans[0].Name)
+	assert.Equal(t, "exec", finishedSpans[1].Name)
+	assert.Equal(t, finishedSpans[0].SpanContext.TraceID(), finishedSpans[1].SpanContext.TraceID())
+}
+
 // Test Helpers
 func (t *TestContext) SleepyJob(job *Job) error {
 	sleepTime := time.Duration(job.ArgInt64("sleep"))
@@ -216,7 +263,7 @@ func (t *TestContext) SleepyJob(job *Job) error {
 func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, concurrency int, jobOpts JobOptions) *WorkerPool {
 	deleteQueue(pool, namespace, jobName)
 	deleteRetryAndDead(pool, namespace)
-	deletePausedAndLockedKeys(namespace, jobName, pool)
+	_ = deletePausedAndLockedKeys(namespace, jobName, pool)
 
 	wp := NewWorkerPool(TestContext{}, uint(concurrency), namespace, pool)
 	wp.JobWithOptions(jobName, jobOpts, (*TestContext).SleepyJob)

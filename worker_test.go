@@ -28,8 +28,8 @@ func TestWorkerBasics(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			arg1 = job.Args["a"].(float64)
 			return nil
 		},
@@ -37,8 +37,8 @@ func TestWorkerBasics(t *testing.T) {
 	jobTypes[job2] = &jobType{
 		Name:       job2,
 		JobOptions: JobOptions{Priority: 1},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			arg2 = job.Args["a"].(float64)
 			return nil
 		},
@@ -46,8 +46,8 @@ func TestWorkerBasics(t *testing.T) {
 	jobTypes[job3] = &jobType{
 		Name:       job3,
 		JobOptions: JobOptions{Priority: 1},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			arg3 = job.Args["a"].(float64)
 			return nil
 		},
@@ -100,8 +100,8 @@ func TestWorkerInProgress(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			time.Sleep(30 * time.Millisecond)
 			return nil
 		},
@@ -153,8 +153,8 @@ func TestWorkerRetry(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1, MaxFails: 3},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			return fmt.Errorf("sorry kid")
 		},
 	}
@@ -205,8 +205,8 @@ func TestWorkerRetryWithCustomBackoff(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1, MaxFails: 3, Backoff: custombo},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			return fmt.Errorf("sorry kid")
 		},
 	}
@@ -252,16 +252,16 @@ func TestWorkerDead(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1, MaxFails: 0},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			return fmt.Errorf("sorry kid1")
 		},
 	}
 	jobTypes[job2] = &jobType{
 		Name:       job2,
 		JobOptions: JobOptions{Priority: 1, MaxFails: 0, SkipDead: true},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			return fmt.Errorf("sorry kid2")
 		},
 	}
@@ -313,8 +313,8 @@ func TestWorkersPaused(t *testing.T) {
 	jobTypes[job1] = &jobType{
 		Name:       job1,
 		JobOptions: JobOptions{Priority: 1},
-		IsGeneric:  true,
-		GenericHandler: func(job *Job) error {
+		isGeneric:  true,
+		genericHandler: func(job *Job) error {
 			time.Sleep(30 * time.Millisecond)
 			return nil
 		},

@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"sync"
 	"time"
 
@@ -13,10 +14,11 @@ type Enqueuer struct {
 	Pool      Pool
 
 	queuePrefix           string // eg, "myapp-work:jobs:"
-	knownJobs             map[string]int64
 	enqueueUniqueScript   *redis.Script
 	enqueueUniqueInScript *redis.Script
-	mtx                   sync.RWMutex
+
+	mtx       sync.RWMutex
+	knownJobs map[string]int64
 }
 
 // NewEnqueuer creates a new enqueuer with the specified Redis namespace and Redis pool.
@@ -37,13 +39,21 @@ func NewEnqueuer(namespace string, pool Pool) *Enqueuer {
 
 // Enqueue will enqueue the specified job name and arguments. The args param can be nil if no args ar needed.
 // Example: e.Enqueue("send_email", work.Q{"addr": "test@example.com"})
-func (e *Enqueuer) Enqueue(jobName string, args map[string]interface{}) (*Job, error) {
+func (e *Enqueuer) Enqueue(jobName string, args Q) (*Job, error) {
+	return e.EnqueueContext(context.Background(), jobName, args)
+}
+
+// EnqueueContext will enqueue the specified job name and arguments. The args param can be nil if no args ar needed.
+// Example: e.Enqueue("send_email", work.Q{"addr": "test@example.com"})
+func (e *Enqueuer) EnqueueContext(ctx context.Context, jobName string, args Q) (*Job, error) {
 	job := &Job{
 		Name:       jobName,
 		ID:         makeIdentifier(),
 		EnqueuedAt: nowEpochSeconds(),
 		Args:       args,
 	}
+
+	job.injectTraceContext(ctx)
 
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -66,12 +76,19 @@ func (e *Enqueuer) Enqueue(jobName string, args map[string]interface{}) (*Job, e
 
 // EnqueueIn enqueues a job in the scheduled job queue for execution in secondsFromNow seconds.
 func (e *Enqueuer) EnqueueIn(jobName string, secondsFromNow int64, args map[string]interface{}) (*ScheduledJob, error) {
+	return e.EnqueueContextIn(context.Background(), jobName, secondsFromNow, args)
+}
+
+// EnqueueContextIn enqueues a job in the scheduled job queue for execution in secondsFromNow seconds.
+func (e *Enqueuer) EnqueueContextIn(ctx context.Context, jobName string, secondsFromNow int64, args Q) (*ScheduledJob, error) {
 	job := &Job{
 		Name:       jobName,
 		ID:         makeIdentifier(),
 		EnqueuedAt: nowEpochSeconds(),
 		Args:       args,
 	}
+
+	job.injectTraceContext(ctx)
 
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -104,7 +121,12 @@ func (e *Enqueuer) EnqueueIn(jobName string, secondsFromNow int64, args map[stri
 // Any failed jobs in the retry queue or dead queue don't count against the uniqueness -- so if a job fails and is retried, two unique jobs with the same name and arguments can be enqueued at once.
 // In order to add robustness to the system, jobs are only unique for 24 hours after they're enqueued. This is mostly relevant for scheduled jobs.
 // EnqueueUnique returns the job if it was enqueued and nil if it wasn't
-func (e *Enqueuer) EnqueueUnique(jobName string, args map[string]interface{}) (*Job, error) {
+func (e *Enqueuer) EnqueueUnique(jobName string, args Q) (*Job, error) {
+	return e.EnqueueContextUnique(context.Background(), jobName, args)
+}
+
+// EnqueueContextUnique does the same as EnqueueUnique with context propagation.
+func (e *Enqueuer) EnqueueContextUnique(ctx context.Context, jobName string, args Q) (*Job, error) {
 	uniqueKey, err := redisKeyUniqueJob(e.Namespace, jobName, args)
 	if err != nil {
 		return nil, err
@@ -117,6 +139,8 @@ func (e *Enqueuer) EnqueueUnique(jobName string, args map[string]interface{}) (*
 		Args:       args,
 		Unique:     true,
 	}
+
+	job.injectTraceContext(ctx)
 
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -139,11 +163,17 @@ func (e *Enqueuer) EnqueueUnique(jobName string, args map[string]interface{}) (*
 	if res == "ok" && err == nil {
 		return job, nil
 	}
+
 	return nil, err
 }
 
 // EnqueueUniqueIn enqueues a unique job in the scheduled job queue for execution in secondsFromNow seconds. See EnqueueUnique for the semantics of unique jobs.
-func (e *Enqueuer) EnqueueUniqueIn(jobName string, secondsFromNow int64, args map[string]interface{}) (*ScheduledJob, error) {
+func (e *Enqueuer) EnqueueUniqueIn(jobName string, secondsFromNow int64, args Q) (*ScheduledJob, error) {
+	return e.EnqueueContextUniqueIn(context.Background(), jobName, secondsFromNow, args)
+}
+
+// // EnqueueContextUniqueIn does the same as EnqueueUniqueIn with context propagation.
+func (e *Enqueuer) EnqueueContextUniqueIn(ctx context.Context, jobName string, secondsFromNow int64, args Q) (*ScheduledJob, error) {
 	uniqueKey, err := redisKeyUniqueJob(e.Namespace, jobName, args)
 	if err != nil {
 		return nil, err
@@ -156,6 +186,8 @@ func (e *Enqueuer) EnqueueUniqueIn(jobName string, secondsFromNow int64, args ma
 		Args:       args,
 		Unique:     true,
 	}
+
+	job.injectTraceContext(ctx)
 
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -185,6 +217,7 @@ func (e *Enqueuer) EnqueueUniqueIn(jobName string, secondsFromNow int64, args ma
 	if res == "ok" && err == nil {
 		return scheduledJob, nil
 	}
+
 	return nil, err
 }
 

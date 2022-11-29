@@ -20,8 +20,10 @@ To enqueue jobs, you need to make an Enqueuer with a redis namespace and a redig
 package main
 
 import (
+	"context"
+
 	"github.com/gomodule/redigo/redis"
-	"github.com/gocraft/work"
+	"github.com/sbermarket-tech/work"
 )
 
 // Make a redis pool
@@ -39,13 +41,15 @@ var enqueuer = work.NewEnqueuer("my_app_namespace", redisPool)
 
 func main() {
 	// Enqueue a job named "send_email" with the specified parameters.
-	_, err := enqueuer.Enqueue("send_email", work.Q{"address": "test@example.com", "subject": "hello world", "customer_id": 4})
+	_, err := enqueuer.EnqueueContext(context.Background(), "send_email", work.Q{
+		"address": "test@example.com",
+		"subject": "hello world",
+		"customer_id": 4,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
 }
-
-
 ```
 
 ## Process jobs
@@ -56,10 +60,11 @@ In order to process jobs, you'll need to make a WorkerPool. Add middleware and j
 package main
 
 import (
-	"github.com/gomodule/redigo/redis"
-	"github.com/gocraft/work"
 	"os"
 	"os/signal"
+
+	"github.com/gomodule/redigo/redis"
+	"github.com/sbermarket-tech/work"
 )
 
 // Make a redis pool
@@ -72,13 +77,14 @@ var redisPool = &redis.Pool{
 	},
 }
 
-type Context struct{
+type Context struct {
     customerID int64
 }
 
 func main() {
 	// Make a new pool. Arguments:
 	// Context{} is a struct that will be the context for the request.
+	// It will be created on each call and passed through the middleware to the handler.
 	// 10 is the max concurrency
 	// "my_app_namespace" is the Redis namespace
 	// redisPool is a Redis pool
@@ -123,7 +129,7 @@ func (c *Context) FindCustomer(job *work.Job, next work.NextMiddlewareFunc) erro
 	return next()
 }
 
-func (c *Context) SendEmail(job *work.Job) error {
+func (c *Context) SendEmail(ctx context.Context, job *work.Job) error {
 	// Extract arguments:
 	addr := job.ArgString("address")
 	subject := job.ArgString("subject")

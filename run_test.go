@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 	"testing"
@@ -25,6 +26,11 @@ func TestRunBasicMiddleware(t *testing.T) {
 		return next()
 	}
 
+	mw4 := func(ctx context.Context, j *Job, next NextMiddlewareFunc) error {
+		j.setArg("mw4", "mw4")
+		return next()
+	}
+
 	h1 := func(c *tstCtx, j *Job) error {
 		c.record("h1")
 		c.record(j.Args["a"].(string))
@@ -32,15 +38,16 @@ func TestRunBasicMiddleware(t *testing.T) {
 	}
 
 	middleware := []*middlewareHandler{
-		{IsGeneric: true, GenericMiddlewareHandler: mw1},
-		{IsGeneric: false, DynamicMiddleware: reflect.ValueOf(mw2)},
-		{IsGeneric: false, DynamicMiddleware: reflect.ValueOf(mw3)},
+		{isGeneric: true, genericMiddleware: mw1},
+		{isGeneric: false, dynamicMiddleware: reflect.ValueOf(mw2)},
+		{isGeneric: false, dynamicMiddleware: reflect.ValueOf(mw3)},
+		{isGeneric: true, genericMiddleware: mw4},
 	}
 
 	jt := &jobType{
 		Name:           "foo",
-		IsGeneric:      false,
-		DynamicHandler: reflect.ValueOf(h1),
+		isGeneric:      false,
+		dynamicHandler: reflect.ValueOf(h1),
 	}
 
 	job := &Job{
@@ -64,13 +71,13 @@ func TestRunHandlerError(t *testing.T) {
 	}
 
 	middleware := []*middlewareHandler{
-		{IsGeneric: true, GenericMiddlewareHandler: mw1},
+		{isGeneric: true, genericMiddleware: mw1},
 	}
 
 	jt := &jobType{
 		Name:           "foo",
-		IsGeneric:      false,
-		DynamicHandler: reflect.ValueOf(h1),
+		isGeneric:      false,
+		dynamicHandler: reflect.ValueOf(h1),
 	}
 
 	job := &Job{
@@ -95,13 +102,13 @@ func TestRunMwError(t *testing.T) {
 	}
 
 	middleware := []*middlewareHandler{
-		{IsGeneric: true, GenericMiddlewareHandler: mw1},
+		{isGeneric: true, genericMiddleware: mw1},
 	}
 
 	jt := &jobType{
 		Name:           "foo",
-		IsGeneric:      false,
-		DynamicHandler: reflect.ValueOf(h1),
+		isGeneric:      false,
+		dynamicHandler: reflect.ValueOf(h1),
 	}
 
 	job := &Job{
@@ -124,13 +131,13 @@ func TestRunHandlerPanic(t *testing.T) {
 	}
 
 	middleware := []*middlewareHandler{
-		{IsGeneric: true, GenericMiddlewareHandler: mw1},
+		{isGeneric: true, genericMiddleware: mw1},
 	}
 
 	jt := &jobType{
 		Name:           "foo",
-		IsGeneric:      false,
-		DynamicHandler: reflect.ValueOf(h1),
+		isGeneric:      false,
+		dynamicHandler: reflect.ValueOf(h1),
 	}
 
 	job := &Job{
@@ -152,13 +159,13 @@ func TestRunMiddlewarePanic(t *testing.T) {
 	}
 
 	middleware := []*middlewareHandler{
-		{IsGeneric: true, GenericMiddlewareHandler: mw1},
+		{isGeneric: true, genericMiddleware: mw1},
 	}
 
 	jt := &jobType{
 		Name:           "foo",
-		IsGeneric:      false,
-		DynamicHandler: reflect.ValueOf(h1),
+		isGeneric:      false,
+		dynamicHandler: reflect.ValueOf(h1),
 	}
 
 	job := &Job{
@@ -168,4 +175,38 @@ func TestRunMiddlewarePanic(t *testing.T) {
 	_, err := runJob(job, tstCtxType, middleware, jt)
 	assert.Error(t, err)
 	assert.Equal(t, "dayam", err.Error())
+}
+
+func TestRunGenericHandler(t *testing.T) {
+	handlers := []struct {
+		handler  interface{}
+		mustFail bool
+	}{
+		{func(*Job) error { return nil }, false},
+		{(&tstCtx{}).genericHandler, false},
+		{(&tstCtx{}).genericContextHandler, false},
+		{func(ctx context.Context, j *Job) error { return nil }, false},
+		{GenericHandler(func(*Job) error { return nil }), true}, // default type is not casted
+	}
+
+	job := &Job{
+		Name: "foo",
+	}
+
+	middleware := []*middlewareHandler{}
+
+	for i, h := range handlers {
+		jt := &jobType{
+			Name:           "foo",
+			isGeneric:      true,
+			genericHandler: h.handler,
+		}
+
+		_, err := runJob(job, tstCtxType, middleware, jt)
+		if !h.mustFail {
+			assert.NoErrorf(t, err, "case: %d", i)
+		} else {
+			assert.Errorf(t, err, "case: %d", i)
+		}
+	}
 }
