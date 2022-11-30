@@ -62,9 +62,11 @@ type JobOptions struct {
 	Backoff        BackoffCalculator // If not set, uses the default backoff algorithm
 }
 
+// Deprecated: use JobHandler instead.
 // GenericHandler is a job handler without any custom context.
 type GenericHandler func(*Job) error
 
+// Deprecated: use JobMiddleware instead.
 // GenericMiddlewareHandler is a middleware without any custom context.
 type GenericMiddlewareHandler func(*Job, NextMiddlewareFunc) error
 
@@ -77,12 +79,16 @@ type middlewareHandler struct {
 	dynamicMiddleware reflect.Value
 }
 
-// Non-exported types are used to cast the job handler and middleware.
+// Job handler types.
 type (
-	genericHandler           = func(*Job) error
-	genericContextHandler    = func(context.Context, *Job) error
-	genericMiddleware        = func(*Job, NextMiddlewareFunc) error
-	genericContextMiddleware = func(context.Context, *Job, NextMiddlewareFunc) error
+	JobHandler        = func(*Job) error
+	JobContextHandler = func(context.Context, *Job) error
+)
+
+// Job middleware types.
+type (
+	JobMiddleware        = func(*Job, NextMiddlewareFunc) error
+	JobContextMiddleware = func(context.Context, *Job, NextMiddlewareFunc) error
 )
 
 // NewWorkerPool creates a new worker pool. ctx should be a struct literal whose type will be used for middleware and handlers.
@@ -130,7 +136,7 @@ func (wp *WorkerPool) Middleware(fn interface{}) *WorkerPool {
 	}
 
 	switch fn.(type) {
-	case genericMiddleware, genericContextMiddleware:
+	case JobMiddleware, JobContextMiddleware:
 		mw.isGeneric = true
 	}
 
@@ -172,7 +178,7 @@ func (wp *WorkerPool) JobWithOptions(name string, jobOpts JobOptions, fn interfa
 	}
 
 	switch fn.(type) {
-	case genericHandler, genericContextHandler:
+	case JobHandler, JobContextHandler:
 		jt.isGeneric = true
 	}
 

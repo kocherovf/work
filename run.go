@@ -22,9 +22,9 @@ func runJob(job *Job, ctxType reflect.Type, middleware []*middlewareHandler, jt 
 			currentMiddleware++
 			if mw.isGeneric {
 				switch mwh := mw.genericMiddleware.(type) {
-				case genericMiddleware:
+				case JobMiddleware:
 					return mwh(job, next)
-				case genericContextMiddleware:
+				case JobContextMiddleware:
 					return mwh(ctx, job, next)
 				}
 			}
@@ -40,9 +40,9 @@ func runJob(job *Job, ctxType reflect.Type, middleware []*middlewareHandler, jt 
 
 		if jt.isGeneric {
 			switch h := jt.genericHandler.(type) {
-			case genericHandler:
+			case JobHandler:
 				return h(job)
-			case genericContextHandler:
+			case JobContextHandler:
 				return h(ctx, job)
 			}
 		}
