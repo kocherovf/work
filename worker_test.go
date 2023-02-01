@@ -1,6 +1,7 @@
 package work
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync/atomic"
@@ -630,4 +631,81 @@ func TestWorkerPoolStop(t *testing.T) {
 	if started >= int32(num_iters) {
 		t.Errorf("Expected that jobs queue was not completely emptied.")
 	}
+}
+
+type fetcherMock struct {
+	returnParam interface{}
+}
+
+func (f *fetcherMock) Do(c redis.Conn, keysAndArgs ...interface{}) (interface{}, error) {
+	return []interface{}{f.returnParam, f.returnParam, f.returnParam}, nil
+}
+
+type redisConnMock struct{}
+
+func (f *redisConnMock) Close() error {
+	return nil
+}
+func (f *redisConnMock) Err() error {
+	return nil
+}
+func (f *redisConnMock) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
+	return nil, nil
+}
+func (f *redisConnMock) Send(commandName string, args ...interface{}) error {
+	return nil
+}
+func (f *redisConnMock) Flush() error {
+	return nil
+}
+func (f *redisConnMock) Receive() (reply interface{}, err error) {
+	return nil, nil
+}
+
+type poolMock struct{}
+
+func (*poolMock) Get() redis.Conn {
+	return &redisConnMock{}
+}
+
+func Benchmark_fetchJob(b *testing.B) {
+	pm := &poolMock{}
+
+	payload, err := json.Marshal(map[string]int{"123": 123})
+	assert.NoError(b, err)
+
+	w := &worker{
+		workerID:         "1",
+		pool:             pm,
+		redisFetchScript: &fetcherMock{returnParam: payload},
+		observer:         newObserver("", pm, "1"),
+		stopChan:         make(chan struct{}),
+		doneStoppingChan: make(chan struct{}),
+		drainChan:        make(chan struct{}),
+		doneDrainingChan: make(chan struct{}),
+	}
+
+	b.Run("old fetcher", func(b *testing.B) {
+		w.sampler = &prioritySamplerOld{}
+		for i := 0; i < 1000; i++ {
+			w.sampler.Add(1, strconv.Itoa(i), "", "", "", "", "")
+		}
+
+		for i := 0; i < b.N; i++ {
+			_, err := w.fetchJobOld()
+			assert.NoError(b, err)
+		}
+	})
+
+	b.Run("new fetcher", func(b *testing.B) {
+		w.sampler = &prioritySamplerInPlaceImpl{}
+		for i := 0; i < 1000; i++ {
+			w.sampler.Add(1, strconv.Itoa(i), "", "", "", "", "")
+		}
+
+		for i := 0; i < b.N; i++ {
+			_, err := w.fetchJob()
+			assert.NoError(b, err)
+		}
+	})
 }
