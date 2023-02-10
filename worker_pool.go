@@ -88,7 +88,7 @@ type (
 // Job middleware types.
 type (
 	JobMiddleware        = func(*Job, NextMiddlewareFunc) error
-	JobContextMiddleware = func(context.Context, *Job, NextMiddlewareFunc) error
+	JobContextMiddleware = func(context.Context, *Job, JobContextHandler) error
 )
 
 // NewWorkerPool creates a new worker pool. ctx should be a struct literal whose type will be used for middleware and handlers.
@@ -120,9 +120,9 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 // Middleware appends the specified function to the middleware chain. The fn can
 // take one of these forms:
 //
-//	func(context.Context, *Job, NextMiddlewareFunc) error
+//	func(context.Context, *Job, JobContextHandler) error
 //	func(*Job, NextMiddlewareFunc) error
-//	(*ContextType).func(context.Context, *Job, NextMiddlewareFunc) error
+//	(*ContextType).func(context.Context, *Job, JobContextHandler) error
 //	(*ContextType).func(*Job, NextMiddlewareFunc) error
 //
 // ContextType matches the type of ctx specified when creating a pool.
@@ -328,13 +328,27 @@ func validateContextType(ctxType reflect.Type) {
 
 func validateHandlerType(ctxType reflect.Type, vfn reflect.Value) {
 	if !isValidHandlerType(ctxType, vfn) {
-		panic(instructiveMessage(vfn, "a handler", "handler", "job *work.Job", ctxType))
+		panic(instructiveMessage(
+			vfn,
+			"a handler",
+			"handler",
+			"job *work.Job",
+			"job *work.Job",
+			ctxType,
+		))
 	}
 }
 
 func validateMiddlewareType(ctxType reflect.Type, vfn reflect.Value) {
 	if !isValidMiddlewareType(ctxType, vfn) {
-		panic(instructiveMessage(vfn, "middleware", "middleware", "job *work.Job, next NextMiddlewareFunc", ctxType))
+		panic(instructiveMessage(
+			vfn,
+			"middleware",
+			"middleware",
+			"job *work.Job, next web.JobContextHandler",
+			"job *work.Job, next web.NextMiddlewareFunc",
+			ctxType,
+		))
 	}
 }
 
@@ -344,9 +358,17 @@ func validateMiddlewareType(ctxType reflect.Type, vfn reflect.Value) {
 //   - vfn is the failed method
 //   - addingType is for "You are adding {addingType} to a worker pool...". Eg, "middleware" or "a handler"
 //   - yourType is for "Your {yourType} function can have...". Eg, "middleware" or "handler" or "error handler"
-//   - args is like "rw web.ResponseWriter, req *web.Request, next web.NextMiddlewareFunc"
+//   - args is like "job *work.Job, next web.JobContextHandler"
+//   - oldArgs is like "job *work.Job, next web.NextMiddlewareFunc"
 //   - NOTE: args can be calculated if you pass in each type. BUT, it doesn't have example argument name, so it has less copy/paste value.
-func instructiveMessage(vfn reflect.Value, addingType string, yourType string, args string, ctxType reflect.Type) string {
+func instructiveMessage(
+	vfn reflect.Value,
+	addingType string,
+	yourType string,
+	args string,
+	oldArgs string,
+	ctxType reflect.Type,
+) string {
 	// Get context type without package.
 	ctxString := ctxType.String()
 	splitted := strings.Split(ctxString, ".")
@@ -369,8 +391,8 @@ func instructiveMessage(vfn reflect.Value, addingType string, yourType string, a
 	str += "* func (c *" + ctxString + ") YourFunctionName(ctx context.Context, " + args + ") error\n"
 	str += "*\n"
 	str += "* // Deprecated but supported options:\n"
-	str += "* func (c *" + ctxString + ") YourFunctionName(" + args + ") error // or,\n"
-	str += "* func YourFunctionName(c *" + ctxString + ", " + args + ") error\n"
+	str += "* func (c *" + ctxString + ") YourFunctionName(" + oldArgs + ") error // or,\n"
+	str += "* func YourFunctionName(c *" + ctxString + ", " + oldArgs + ") error\n"
 	str += "*\n"
 	str += "* Unfortunately, your function has this signature: " + vfn.Type().String() + "\n"
 	str += "*\n"
@@ -451,10 +473,11 @@ func isValidMiddlewareType(ctxType reflect.Type, vfn reflect.Value) bool {
 	var ctx *context.Context
 	var j *Job
 	var nfn NextMiddlewareFunc
+	var jch JobContextHandler
 
 	switch numIn {
+	// func(j *Job, n NextMiddlewareFunc) error
 	case 2:
-		// func(j *Job, n NextMiddlewareFunc) error
 		if fnType.In(0) != reflect.TypeOf(j) {
 			return false
 		}
@@ -463,15 +486,26 @@ func isValidMiddlewareType(ctxType reflect.Type, vfn reflect.Value) bool {
 		}
 
 	case 3:
-		// func(ctx context.Context, j *Job, n NextMiddlewareFunc) error
+		switch fnType.In(2) {
 		// func(c *tstCtx, j *Job, n NextMiddlewareFunc) error
-		if fnType.In(0) != reflect.PtrTo(ctxType) && fnType.In(0) != reflect.TypeOf(ctx).Elem() {
-			return false
-		}
-		if fnType.In(1) != reflect.TypeOf(j) {
-			return false
-		}
-		if fnType.In(2) != reflect.TypeOf(nfn) {
+		case reflect.TypeOf(nfn):
+			if fnType.In(0) != reflect.PtrTo(ctxType) {
+				return false
+			}
+			if fnType.In(1) != reflect.TypeOf(j) {
+				return false
+			}
+
+		// func(ctx context.Context, j *Job, n JobContextHandler) error
+		case reflect.TypeOf(jch):
+			if fnType.In(0) != reflect.TypeOf(ctx).Elem() {
+				return false
+			}
+			if fnType.In(1) != reflect.TypeOf(j) {
+				return false
+			}
+
+		default:
 			return false
 		}
 

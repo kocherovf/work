@@ -26,9 +26,9 @@ func TestRunBasicMiddleware(t *testing.T) {
 		return next()
 	}
 
-	mw4 := func(ctx context.Context, j *Job, next NextMiddlewareFunc) error {
+	mw4 := func(ctx context.Context, j *Job, next JobContextHandler) error {
 		j.setArg("mw4", "mw4")
-		return next()
+		return next(ctx, j)
 	}
 
 	h1 := func(c *tstCtx, j *Job) error {

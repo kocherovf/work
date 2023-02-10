@@ -20,8 +20,8 @@ type tstCtx struct {
 	bytes.Buffer
 }
 
-func (*tstCtx) genericHandler(*Job) error        { return nil }
-func (*tstCtx) genericContextHandler(*Job) error { return nil }
+func (*tstCtx) genericHandler(*Job) error                         { return nil }
+func (*tstCtx) genericContextHandler(context.Context, *Job) error { return nil }
 
 func (c *tstCtx) record(s string) {
 	_, _ = c.WriteString(s)
@@ -60,7 +60,7 @@ func TestWorkerPoolMiddlewareValidations(t *testing.T) {
 		good bool
 	}{
 		{func(j *Job, n NextMiddlewareFunc) error { return nil }, true},
-		{func(ctx context.Context, j *Job, n NextMiddlewareFunc) error { return nil }, true},
+		{func(ctx context.Context, j *Job, n JobContextHandler) error { return nil }, true},
 		{func(c *tstCtx, j *Job, n NextMiddlewareFunc) error { return nil }, true},
 		{func(c *tstCtx, j *Job) error { return nil }, false},
 		{func(c *tstCtx, j *Job, n NextMiddlewareFunc) {}, false},
