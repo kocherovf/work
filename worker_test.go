@@ -1,7 +1,6 @@
 package work
 
 import (
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync/atomic"
@@ -666,46 +665,4 @@ type poolMock struct{}
 
 func (*poolMock) Get() redis.Conn {
 	return &redisConnMock{}
-}
-
-func Benchmark_fetchJob(b *testing.B) {
-	pm := &poolMock{}
-
-	payload, err := json.Marshal(map[string]int{"123": 123})
-	assert.NoError(b, err)
-
-	w := &worker{
-		workerID:         "1",
-		pool:             pm,
-		redisFetchScript: &fetcherMock{returnParam: payload},
-		observer:         newObserver("", pm, "1"),
-		stopChan:         make(chan struct{}),
-		doneStoppingChan: make(chan struct{}),
-		drainChan:        make(chan struct{}),
-		doneDrainingChan: make(chan struct{}),
-	}
-
-	b.Run("old fetcher", func(b *testing.B) {
-		w.sampler = &prioritySamplerOld{}
-		for i := 0; i < 1000; i++ {
-			w.sampler.Add(1, strconv.Itoa(i), "", "", "", "", "")
-		}
-
-		for i := 0; i < b.N; i++ {
-			_, err := w.fetchJob()
-			assert.NoError(b, err)
-		}
-	})
-
-	b.Run("new fetcher", func(b *testing.B) {
-		w.sampler = &prioritySamplerInPlaceImpl{}
-		for i := 0; i < 1000; i++ {
-			w.sampler.Add(1, strconv.Itoa(i), "", "", "", "", "")
-		}
-
-		for i := 0; i < b.N; i++ {
-			_, err := w.fetchJob()
-			assert.NoError(b, err)
-		}
-	})
 }
