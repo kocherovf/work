@@ -150,55 +150,6 @@ func (w *worker) loop() {
 	}
 }
 
-func (w *worker) fetchJobOld() (*Job, error) {
-	// resort queues
-	// NOTE: we could optimize this to only resort every second, or something.
-	w.sampler.Sample()
-	samples := w.sampler.GetSamples()
-	numKeys := len(samples) * fetchKeysPerJobType
-	var scriptArgs = make([]interface{}, 0, numKeys+1)
-
-	for _, s := range samples {
-		scriptArgs = append(scriptArgs, s.redisJobs, s.redisJobsInProg, s.redisJobsPaused, s.redisJobsLock, s.redisJobsLockInfo, s.redisJobsMaxConcurrency) // KEYS[1-6 * N]
-	}
-	scriptArgs = append(scriptArgs, w.poolID) // ARGV[1]
-	conn := w.pool.Get()
-	defer conn.Close()
-
-	values, err := redis.Values(w.redisFetchScript.Do(conn, scriptArgs...))
-	if err == redis.ErrNil {
-		return nil, nil
-	} else if err != nil {
-		return nil, err
-	}
-
-	if len(values) != 3 {
-		return nil, fmt.Errorf("need 3 elements back")
-	}
-
-	rawJSON, ok := values[0].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("response msg not bytes")
-	}
-
-	dequeuedFrom, ok := values[1].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("response queue not bytes")
-	}
-
-	inProgQueue, ok := values[2].([]byte)
-	if !ok {
-		return nil, fmt.Errorf("response in prog not bytes")
-	}
-
-	job, err := newJobOld(rawJSON, dequeuedFrom, inProgQueue)
-	if err != nil {
-		return nil, err
-	}
-
-	return job, nil
-}
-
 func (w *worker) fetchJob() (*Job, error) {
 	// resort queues
 	// NOTE: we could optimize this to only resort every second, or something.

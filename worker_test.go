@@ -692,7 +692,7 @@ func Benchmark_fetchJob(b *testing.B) {
 		}
 
 		for i := 0; i < b.N; i++ {
-			_, err := w.fetchJobOld()
+			_, err := w.fetchJob()
 			assert.NoError(b, err)
 		}
 	})
