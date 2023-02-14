@@ -3,7 +3,6 @@ package work
 import (
 	"encoding/json"
 	"fmt"
-	json2 "github.com/goccy/go-json"
 	"math"
 	"reflect"
 )
@@ -36,21 +35,9 @@ type Job struct {
 // Example: e.Enqueue("send_email", work.Q{"addr": "test@example.com", "track": true})
 type Q map[string]interface{}
 
-func newJobOld(rawJSON, dequeuedFrom, inProgQueue []byte) (*Job, error) {
-	var job Job
-	err := json.Unmarshal(rawJSON, &job)
-	if err != nil {
-		return nil, err
-	}
-	job.rawJSON = rawJSON
-	job.dequeuedFrom = dequeuedFrom
-	job.inProgQueue = inProgQueue
-	return &job, nil
-}
-
 func newJob(rawJSON, dequeuedFrom, inProgQueue []byte) (*Job, error) {
 	var job Job
-	err := json2.Unmarshal(rawJSON, &job)
+	err := json.Unmarshal(rawJSON, &job)
 	if err != nil {
 		return nil, err
 	}
