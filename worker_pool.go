@@ -1,6 +1,7 @@
 package work
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"strings"
@@ -34,9 +35,9 @@ type jobType struct {
 	Name string
 	JobOptions
 
-	IsGeneric      bool
-	GenericHandler GenericHandler
-	DynamicHandler reflect.Value
+	isGeneric      bool
+	genericHandler interface{}
+	dynamicHandler reflect.Value
 }
 
 func (jt *jobType) calcBackoff(j *Job) int64 {
@@ -61,9 +62,11 @@ type JobOptions struct {
 	Backoff        BackoffCalculator // If not set, uses the default backoff algorithm
 }
 
+// Deprecated: use JobHandler instead.
 // GenericHandler is a job handler without any custom context.
 type GenericHandler func(*Job) error
 
+// Deprecated: use JobMiddleware instead.
 // GenericMiddlewareHandler is a middleware without any custom context.
 type GenericMiddlewareHandler func(*Job, NextMiddlewareFunc) error
 
@@ -71,10 +74,22 @@ type GenericMiddlewareHandler func(*Job, NextMiddlewareFunc) error
 type NextMiddlewareFunc func() error
 
 type middlewareHandler struct {
-	IsGeneric                bool
-	DynamicMiddleware        reflect.Value
-	GenericMiddlewareHandler GenericMiddlewareHandler
+	isGeneric         bool
+	genericMiddleware interface{}
+	dynamicMiddleware reflect.Value
 }
+
+// Job handler types.
+type (
+	JobHandler        = func(*Job) error
+	JobContextHandler = func(context.Context, *Job) error
+)
+
+// Job middleware types.
+type (
+	JobMiddleware        = func(*Job, NextMiddlewareFunc) error
+	JobContextMiddleware = func(context.Context, *Job, JobContextHandler) error
+)
 
 // NewWorkerPool creates a new worker pool. ctx should be a struct literal whose type will be used for middleware and handlers.
 // concurrency specifies how many workers to spin up - each worker can process jobs concurrently.
@@ -102,20 +117,27 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 	return wp
 }
 
-// Middleware appends the specified function to the middleware chain. The fn can take one of these forms:
-// (*ContextType).func(*Job, NextMiddlewareFunc) error, (ContextType matches the type of ctx specified when creating a pool)
-// func(*Job, NextMiddlewareFunc) error, for the generic middleware format.
+// Middleware appends the specified function to the middleware chain. The fn can
+// take one of these forms:
+//
+//	func(context.Context, *Job, JobContextHandler) error
+//	func(*Job, NextMiddlewareFunc) error
+//	(*ContextType).func(context.Context, *Job, JobContextHandler) error
+//	(*ContextType).func(*Job, NextMiddlewareFunc) error
+//
+// ContextType matches the type of ctx specified when creating a pool.
 func (wp *WorkerPool) Middleware(fn interface{}) *WorkerPool {
 	vfn := reflect.ValueOf(fn)
 	validateMiddlewareType(wp.contextType, vfn)
 
 	mw := &middlewareHandler{
-		DynamicMiddleware: vfn,
+		genericMiddleware: fn,
+		dynamicMiddleware: vfn,
 	}
 
-	if gmh, ok := fn.(func(*Job, NextMiddlewareFunc) error); ok {
-		mw.IsGeneric = true
-		mw.GenericMiddlewareHandler = gmh
+	switch fn.(type) {
+	case JobMiddleware, JobContextMiddleware:
+		mw.isGeneric = true
 	}
 
 	wp.middleware = append(wp.middleware, mw)
@@ -129,8 +151,13 @@ func (wp *WorkerPool) Middleware(fn interface{}) *WorkerPool {
 
 // Job registers the job name to the specified handler fn. For instance, when workers pull jobs from the name queue they'll be processed by the specified handler function.
 // fn can take one of these forms:
-// (*ContextType).func(*Job) error, (ContextType matches the type of ctx specified when creating a pool)
-// func(*Job) error, for the generic handler format.
+//
+//	func(context.Context, *Job) error
+//	func(*Job) error
+//	(*ContextType).func(context.Context, *Job) error
+//	(*ContextType).func(*Job) error
+//
+// ContextType matches the type of ctx specified when creating a pool.
 func (wp *WorkerPool) Job(name string, fn interface{}) *WorkerPool {
 	return wp.JobWithOptions(name, JobOptions{}, fn)
 }
@@ -142,14 +169,17 @@ func (wp *WorkerPool) JobWithOptions(name string, jobOpts JobOptions, fn interfa
 
 	vfn := reflect.ValueOf(fn)
 	validateHandlerType(wp.contextType, vfn)
+
 	jt := &jobType{
 		Name:           name,
-		DynamicHandler: vfn,
 		JobOptions:     jobOpts,
+		genericHandler: fn,
+		dynamicHandler: vfn,
 	}
-	if gh, ok := fn.(func(*Job) error); ok {
-		jt.IsGeneric = true
-		jt.GenericHandler = gh
+
+	switch fn.(type) {
+	case JobHandler, JobContextHandler:
+		jt.isGeneric = true
 	}
 
 	wp.jobTypes[name] = jt
@@ -298,25 +328,47 @@ func validateContextType(ctxType reflect.Type) {
 
 func validateHandlerType(ctxType reflect.Type, vfn reflect.Value) {
 	if !isValidHandlerType(ctxType, vfn) {
-		panic(instructiveMessage(vfn, "a handler", "handler", "job *work.Job", ctxType))
+		panic(instructiveMessage(
+			vfn,
+			"a handler",
+			"handler",
+			"job *work.Job",
+			"job *work.Job",
+			ctxType,
+		))
 	}
 }
 
 func validateMiddlewareType(ctxType reflect.Type, vfn reflect.Value) {
 	if !isValidMiddlewareType(ctxType, vfn) {
-		panic(instructiveMessage(vfn, "middleware", "middleware", "job *work.Job, next NextMiddlewareFunc", ctxType))
+		panic(instructiveMessage(
+			vfn,
+			"middleware",
+			"middleware",
+			"job *work.Job, next web.JobContextHandler",
+			"job *work.Job, next web.NextMiddlewareFunc",
+			ctxType,
+		))
 	}
 }
 
 // Since it's easy to pass the wrong method as a middleware/handler, and since the user can't rely on static type checking since we use reflection,
 // lets be super helpful about what they did and what they need to do.
 // Arguments:
-//  - vfn is the failed method
-//  - addingType is for "You are adding {addingType} to a worker pool...". Eg, "middleware" or "a handler"
-//  - yourType is for "Your {yourType} function can have...". Eg, "middleware" or "handler" or "error handler"
-//  - args is like "rw web.ResponseWriter, req *web.Request, next web.NextMiddlewareFunc"
-//    - NOTE: args can be calculated if you pass in each type. BUT, it doesn't have example argument name, so it has less copy/paste value.
-func instructiveMessage(vfn reflect.Value, addingType string, yourType string, args string, ctxType reflect.Type) string {
+//   - vfn is the failed method
+//   - addingType is for "You are adding {addingType} to a worker pool...". Eg, "middleware" or "a handler"
+//   - yourType is for "Your {yourType} function can have...". Eg, "middleware" or "handler" or "error handler"
+//   - args is like "job *work.Job, next web.JobContextHandler"
+//   - oldArgs is like "job *work.Job, next web.NextMiddlewareFunc"
+//   - NOTE: args can be calculated if you pass in each type. BUT, it doesn't have example argument name, so it has less copy/paste value.
+func instructiveMessage(
+	vfn reflect.Value,
+	addingType string,
+	yourType string,
+	args string,
+	oldArgs string,
+	ctxType reflect.Type,
+) string {
 	// Get context type without package.
 	ctxString := ctxType.String()
 	splitted := strings.Split(ctxString, ".")
@@ -335,8 +387,12 @@ func instructiveMessage(vfn reflect.Value, addingType string, yourType string, a
 	str += "* func YourFunctionName(" + args + ") error\n"
 	str += "*\n"
 	str += "* // If you want your " + yourType + " to accept a context:\n"
-	str += "* func (c *" + ctxString + ") YourFunctionName(" + args + ") error  // or,\n"
-	str += "* func YourFunctionName(c *" + ctxString + ", " + args + ") error\n"
+	str += "* func YourFunctionName(ctx context.Context, " + args + ") error // or,\n"
+	str += "* func (c *" + ctxString + ") YourFunctionName(ctx context.Context, " + args + ") error\n"
+	str += "*\n"
+	str += "* // Deprecated but supported options:\n"
+	str += "* func (c *" + ctxString + ") YourFunctionName(" + oldArgs + ") error // or,\n"
+	str += "* func YourFunctionName(c *" + ctxString + ", " + oldArgs + ") error\n"
 	str += "*\n"
 	str += "* Unfortunately, your function has this signature: " + vfn.Type().String() + "\n"
 	str += "*\n"
@@ -366,19 +422,27 @@ func isValidHandlerType(ctxType reflect.Type, vfn reflect.Value) bool {
 		return false
 	}
 
+	var ctx *context.Context
 	var j *Job
-	if numIn == 1 {
+
+	switch numIn {
+	case 1:
+		// func(j *Job) error
 		if fnType.In(0) != reflect.TypeOf(j) {
 			return false
 		}
-	} else if numIn == 2 {
-		if fnType.In(0) != reflect.PtrTo(ctxType) {
+
+	case 2:
+		// func(c *tstCtx, j *Job) error
+		// func(ctx context.Context, j *Job) error
+		if fnType.In(0) != reflect.PtrTo(ctxType) && fnType.In(0) != reflect.TypeOf(ctx).Elem() {
 			return false
 		}
 		if fnType.In(1) != reflect.TypeOf(j) {
 			return false
 		}
-	} else {
+
+	default:
 		return false
 	}
 
@@ -406,26 +470,46 @@ func isValidMiddlewareType(ctxType reflect.Type, vfn reflect.Value) bool {
 		return false
 	}
 
+	var ctx *context.Context
 	var j *Job
 	var nfn NextMiddlewareFunc
-	if numIn == 2 {
+	var jch JobContextHandler
+
+	switch numIn {
+	// func(j *Job, n NextMiddlewareFunc) error
+	case 2:
 		if fnType.In(0) != reflect.TypeOf(j) {
 			return false
 		}
 		if fnType.In(1) != reflect.TypeOf(nfn) {
 			return false
 		}
-	} else if numIn == 3 {
-		if fnType.In(0) != reflect.PtrTo(ctxType) {
+
+	case 3:
+		switch fnType.In(2) {
+		// func(c *tstCtx, j *Job, n NextMiddlewareFunc) error
+		case reflect.TypeOf(nfn):
+			if fnType.In(0) != reflect.PtrTo(ctxType) {
+				return false
+			}
+			if fnType.In(1) != reflect.TypeOf(j) {
+				return false
+			}
+
+		// func(ctx context.Context, j *Job, n JobContextHandler) error
+		case reflect.TypeOf(jch):
+			if fnType.In(0) != reflect.TypeOf(ctx).Elem() {
+				return false
+			}
+			if fnType.In(1) != reflect.TypeOf(j) {
+				return false
+			}
+
+		default:
 			return false
 		}
-		if fnType.In(1) != reflect.TypeOf(j) {
-			return false
-		}
-		if fnType.In(2) != reflect.TypeOf(nfn) {
-			return false
-		}
-	} else {
+
+	default:
 		return false
 	}
 

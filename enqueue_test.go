@@ -1,12 +1,16 @@
 package work
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 func TestEnqueue(t *testing.T) {
@@ -49,6 +53,28 @@ func TestEnqueue(t *testing.T) {
 	_, err = enqueuer.Enqueue("wat", Q{"a": 1, "b": "cool"})
 	assert.Nil(t, err)
 	assert.EqualValues(t, 2, listSize(pool, redisKeyJobs(ns, "wat")))
+}
+
+func TestEnqueueContext(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	jobName := "myjob"
+	cleanKeyspace(ns, pool)
+
+	exp := tracetest.NewInMemoryExporter()
+	tp := trace.NewTracerProvider(trace.WithSyncer(exp))
+
+	ctx, span := tp.Tracer("").Start(context.Background(), "test trace")
+	span.End()
+
+	enqueuer := NewEnqueuer(ns, pool)
+
+	j, err := enqueuer.EnqueueContext(ctx, jobName, Q{"asdf": "bcd"})
+	require.NoError(t, err)
+	assert.NotNil(t, j.TraceContext)
+
+	job := jobOnQueue(pool, redisKeyJobs(ns, jobName))
+	assert.Equal(t, j.TraceContext, job.TraceContext)
 }
 
 func TestEnqueueIn(t *testing.T) {

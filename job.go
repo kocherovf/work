@@ -1,10 +1,14 @@
 package work
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
+
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Job represents a job.
@@ -23,6 +27,9 @@ type Job struct {
 
 	// StartingDeadline is used to skip periodic jobs that are no longer relevant.
 	StartingDeadline int64 `json:"d,omitempty"`
+
+	// TraceContext contains the OpenTelemetry trace context to propagate the context.
+	TraceContext map[string]string `json:"trace,omitempty"`
 
 	rawJSON      []byte
 	dequeuedFrom []byte
@@ -158,6 +165,31 @@ func (j *Job) ArgBool(key string) bool {
 // ArgError returns the last error generated when extracting typed params. Returns nil if extracting the args went fine.
 func (j *Job) ArgError() error {
 	return j.argError
+}
+
+// injectTraceContext sets the trace context from ctx to the Job to save. It uses
+// the default W3C propagator.
+func (j *Job) injectTraceContext(ctx context.Context) {
+	span := trace.SpanFromContext(ctx)
+	if !span.SpanContext().IsValid() {
+		return
+	}
+
+	carrier := make(propagation.MapCarrier, 2)
+
+	propagation.TraceContext{}.Inject(ctx, carrier)
+
+	j.TraceContext = carrier
+}
+
+// extractTraceContext returns a context with a trace context. It uses the default
+// W3C propagator.
+func (j *Job) extractTraceContext(ctx context.Context) context.Context {
+	if j.TraceContext == nil {
+		return ctx
+	}
+
+	return propagation.TraceContext{}.Extract(ctx, propagation.MapCarrier(j.TraceContext))
 }
 
 func isIntKind(v reflect.Value) bool {
