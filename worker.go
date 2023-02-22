@@ -11,16 +11,6 @@ import (
 
 const fetchKeysPerJobType = 6
 
-type fetcher interface {
-	Do(c redis.Conn, keysAndArgs ...interface{}) (interface{}, error)
-}
-
-type prioritySampler interface {
-	Add(priority uint, redisJobs string, redisJobsInProg string, redisJobsPaused string, redisJobsLock string, redisJobsLockInfo string, redisJobsMaxConcurrency string)
-	Sample() []sampleItem
-	GetSamples() []sampleItem
-}
-
 type worker struct {
 	workerID    string
 	poolID      string
@@ -30,7 +20,7 @@ type worker struct {
 	middleware  []*middlewareHandler
 	contextType reflect.Type
 
-	redisFetchScript fetcher
+	redisFetchScript *redis.Script
 	sampler          prioritySampler
 	*observer
 
@@ -74,9 +64,9 @@ func newWorker(namespace string, poolID string, pool Pool, contextType reflect.T
 // note: can't be called while the thing is started
 func (w *worker) updateMiddlewareAndJobTypes(middleware []*middlewareHandler, jobTypes map[string]*jobType) {
 	w.middleware = middleware
-	sampler := &prioritySamplerInPlaceImpl{}
+	sampler := prioritySampler{}
 	for _, jt := range jobTypes {
-		sampler.Add(jt.Priority,
+		sampler.add(jt.Priority,
 			redisKeyJobs(w.namespace, jt.Name),
 			redisKeyJobsInProgress(w.namespace, w.poolID, jt.Name),
 			redisKeyJobsPaused(w.namespace, jt.Name),
@@ -153,12 +143,11 @@ func (w *worker) loop() {
 func (w *worker) fetchJob() (*Job, error) {
 	// resort queues
 	// NOTE: we could optimize this to only resort every second, or something.
-	w.sampler.Sample()
-	samples := w.sampler.GetSamples()
-	numKeys := len(samples) * fetchKeysPerJobType
+	w.sampler.sample()
+	numKeys := len(w.sampler.samples) * fetchKeysPerJobType
 	var scriptArgs = make([]interface{}, 0, numKeys+1)
 
-	for _, s := range samples {
+	for _, s := range w.sampler.samples {
 		scriptArgs = append(scriptArgs, s.redisJobs, s.redisJobsInProg, s.redisJobsPaused, s.redisJobsLock, s.redisJobsLockInfo, s.redisJobsMaxConcurrency) // KEYS[1-6 * N]
 	}
 	scriptArgs = append(scriptArgs, w.poolID) // ARGV[1]
