@@ -631,38 +631,3 @@ func TestWorkerPoolStop(t *testing.T) {
 		t.Errorf("Expected that jobs queue was not completely emptied.")
 	}
 }
-
-type fetcherMock struct {
-	returnParam interface{}
-}
-
-func (f *fetcherMock) Do(c redis.Conn, keysAndArgs ...interface{}) (interface{}, error) {
-	return []interface{}{f.returnParam, f.returnParam, f.returnParam}, nil
-}
-
-type redisConnMock struct{}
-
-func (f *redisConnMock) Close() error {
-	return nil
-}
-func (f *redisConnMock) Err() error {
-	return nil
-}
-func (f *redisConnMock) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
-	return nil, nil
-}
-func (f *redisConnMock) Send(commandName string, args ...interface{}) error {
-	return nil
-}
-func (f *redisConnMock) Flush() error {
-	return nil
-}
-func (f *redisConnMock) Receive() (reply interface{}, err error) {
-	return nil, nil
-}
-
-type poolMock struct{}
-
-func (*poolMock) Get() redis.Conn {
-	return &redisConnMock{}
-}
