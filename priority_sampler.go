@@ -4,7 +4,7 @@ import (
 	"math/rand"
 )
 
-type prioritySamplerInPlaceImpl struct {
+type prioritySampler struct {
 	sum     uint
 	samples []sampleItem
 }
@@ -21,7 +21,7 @@ type sampleItem struct {
 	redisJobsMaxConcurrency string
 }
 
-func (s *prioritySamplerInPlaceImpl) Add(priority uint, redisJobs, redisJobsInProg, redisJobsPaused, redisJobsLock, redisJobsLockInfo, redisJobsMaxConcurrency string) {
+func (s *prioritySampler) add(priority uint, redisJobs, redisJobsInProg, redisJobsPaused, redisJobsLock, redisJobsLockInfo, redisJobsMaxConcurrency string) {
 	sample := sampleItem{
 		priority:                priority,
 		redisJobs:               redisJobs,
@@ -35,15 +35,14 @@ func (s *prioritySamplerInPlaceImpl) Add(priority uint, redisJobs, redisJobsInPr
 	s.sum += priority
 }
 
-// Sample re-sorts s.samples, modifying it in-place. Higher weighted things will tend to go towards the beginning.
+// sample re-sorts s.samples, modifying it in-place. Higher weighted things will tend to go towards the beginning.
 // NOTE: as written currently makes 0 allocations.
 // NOTE2: this is an O(n^2 algorithm) that is:
-//
-//	5492ns for 50 jobs (50 is a large number of unique jobs in my experience)
-//	54966ns for 200 jobs
-//	~1ms for 1000 jobs
-//	~4ms for 2000 jobs
-func (s *prioritySamplerInPlaceImpl) Sample() []sampleItem {
+//     5492ns for 50 jobs (50 is a large number of unique jobs in my experience)
+//     54966ns for 200 jobs
+//     ~1ms for 1000 jobs
+//     ~4ms for 2000 jobs
+func (s *prioritySampler) sample() []sampleItem {
 	lenSamples := len(s.samples)
 	remaining := lenSamples
 	sumRemaining := s.sum
@@ -61,15 +60,15 @@ func (s *prioritySamplerInPlaceImpl) Sample() []sampleItem {
 
 		prevSum := uint(0)
 		for i := lenSamples - 1; i >= lastValidIdx; i-- {
-			samplePriority := s.samples[i].priority
-			if rn < (samplePriority + prevSum) {
+			sample := s.samples[i]
+			if rn < (sample.priority + prevSum) {
 				// move the sample to the beginning
 				s.samples[i], s.samples[lastValidIdx] = s.samples[lastValidIdx], s.samples[i]
 
-				sumRemaining -= samplePriority
+				sumRemaining -= sample.priority
 				break
 			} else {
-				prevSum += samplePriority
+				prevSum += sample.priority
 			}
 		}
 
@@ -77,9 +76,5 @@ func (s *prioritySamplerInPlaceImpl) Sample() []sampleItem {
 		remaining--
 	}
 
-	return s.samples
-}
-
-func (s *prioritySamplerInPlaceImpl) GetSamples() []sampleItem {
 	return s.samples
 }
