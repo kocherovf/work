@@ -219,9 +219,15 @@ job, err = enqueuer.EnqueueUniqueIn("clear_cache", 300, work.Q{"object_id_": "78
 
 ### Periodic Enqueueing (Cron)
 
-You can periodically enqueue jobs on your gocraft/work cluster using your worker pool. The [scheduling specification](https://godoc.org/github.com/robfig/cron#hdr-CRON_Expression_Format) uses a Cron syntax where the fields represent seconds, minutes, hours, day of the month, month, and week of the day, respectively. Even if you have multiple worker pools on different machines, they'll all coordinate and only enqueue your job once.
+You can periodically enqueue jobs on your gocraft/work cluster using your worker
+pool. The [scheduling specification](https://pkg.go.dev/github.com/robfig/cron/v3#hdr-CRON_Expression_Format)
+uses a Cron syntax where the fields represent an optional seconds, minutes, hours,
+day of the month, month, and week of the day, respectively. Even if you have multiple
+worker pools on different machines, they'll all coordinate and only enqueue your
+job once.
 
-**NOTE:** Use only the asterisk format as in the example below, not @every. In this case, each job has a predictable byte format and will be deduplicated.
+**NOTE:** Use only the asterisk format as in the example below, not @every. In
+this case, each job has a predictable byte format and will be deduplicated.
 
 ```go
 pool := work.NewWorkerPool(Context{}, 10, "my_app_namespace", redisPool)

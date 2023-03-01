@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
-	"github.com/robfig/cron"
+	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -110,7 +110,7 @@ func TestPeriodicEnqueuerSpawn(t *testing.T) {
 }
 
 func appendPeriodicJob(pjs []*periodicJob, spec, jobName string) []*periodicJob {
-	sched, err := cron.Parse(spec)
+	sched, err := cron.NewParser(cronFormat).Parse(spec)
 	if err != nil {
 		panic(err)
 	}
