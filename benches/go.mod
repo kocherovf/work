@@ -22,7 +22,11 @@ require (
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/garyburd/redigo v1.6.3 // indirect
 	github.com/kr/pretty v0.3.0 // indirect
-	github.com/robfig/cron v1.2.0 // indirect
+	github.com/robfig/cron/v3 v3.0.1 // indirect
+	go.opentelemetry.io/otel v1.11.2 // indirect
+	go.opentelemetry.io/otel/trace v1.11.2 // indirect
+	go.uber.org/atomic v1.7.0 // indirect
+	go.uber.org/multierr v1.8.0 // indirect
 	golang.org/x/net v0.0.0-20200822124328-c89045814202 // indirect
 	vitess.io/vitess v3.0.0-rc.3.0.20181212200900-e2c5239f54d1+incompatible // indirect
 )

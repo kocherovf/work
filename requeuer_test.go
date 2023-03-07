@@ -3,7 +3,7 @@ package work
 import (
 	"testing"
 
-	"github.com/robfig/cron"
+	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -88,7 +88,7 @@ func TestRequeuePeriodic(t *testing.T) {
 
 	jobName := "clean"
 	jobSpec := "*/1 * * * * *"
-	shedule, err := cron.Parse(jobSpec)
+	shedule, err := cron.NewParser(cronFormat).Parse(jobSpec)
 	assert.NoError(t, err)
 
 	jobs := []*periodicJob{
