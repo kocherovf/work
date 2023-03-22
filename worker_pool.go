@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/robfig/cron/v3"
 )
@@ -29,6 +30,7 @@ type WorkerPool struct {
 	heartbeater      *workerPoolHeartbeater
 	retrier          *requeuer
 	scheduler        *requeuer
+	reapPeriod       time.Duration
 	deadPoolReaper   *deadPoolReaper
 	periodicEnqueuer *periodicEnqueuer
 }
@@ -95,7 +97,7 @@ type (
 
 // NewWorkerPool creates a new worker pool. ctx should be a struct literal whose type will be used for middleware and handlers.
 // concurrency specifies how many workers to spin up - each worker can process jobs concurrently.
-func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Pool) *WorkerPool {
+func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Pool, opts ...WorkerPoolOption) *WorkerPool {
 	if pool == nil {
 		panic("NewWorkerPool needs a non-nil Pool")
 	}
@@ -109,6 +111,10 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 		pool:         pool,
 		contextType:  ctxType,
 		jobTypes:     make(map[string]*jobType),
+	}
+
+	for _, opt := range opts {
+		opt(wp)
 	}
 
 	for i := uint(0); i < wp.concurrency; i++ {
@@ -273,7 +279,7 @@ func (wp *WorkerPool) startRequeuers() {
 	}
 	wp.retrier = newRequeuer(wp.namespace, wp.pool, redisKeyRetry(wp.namespace), jobNames)
 	wp.scheduler = newRequeuer(wp.namespace, wp.pool, redisKeyScheduled(wp.namespace), jobNames)
-	wp.deadPoolReaper = newDeadPoolReaper(wp.namespace, wp.pool, jobNames)
+	wp.deadPoolReaper = newDeadPoolReaper(wp.namespace, wp.pool, jobNames, wp.reapPeriod)
 	wp.retrier.start()
 	wp.scheduler.start()
 	wp.deadPoolReaper.start()
@@ -532,4 +538,14 @@ func applyDefaultsAndValidate(jobOpts JobOptions) JobOptions {
 	}
 
 	return jobOpts
+}
+
+// WorkerPoolOption is an optional option for WorkerPool.
+type WorkerPoolOption func(wp *WorkerPool)
+
+// WithReapPeriod defines the reaper running cycle period.
+func WithReapPeriod(p time.Duration) WorkerPoolOption {
+	return func(wp *WorkerPool) {
+		wp.reapPeriod = p
+	}
 }

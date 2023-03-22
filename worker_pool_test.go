@@ -268,6 +268,7 @@ func setupTestWorkerPool(pool *redis.Pool, namespace, jobName string, concurrenc
 	wp := NewWorkerPool(TestContext{}, uint(concurrency), namespace, pool)
 	wp.JobWithOptions(jobName, jobOpts, (*TestContext).SleepyJob)
 	// reset the backoff times to help with testing
-	sleepBackoffsInMilliseconds = []int64{10, 10, 10, 10, 10}
+	sleepBackoffs = []time.Duration{time.Millisecond * 10}
+
 	return wp
 }

@@ -11,6 +11,14 @@ import (
 
 const fetchKeysPerJobType = 6
 
+var sleepBackoffs = []time.Duration{
+	time.Millisecond * 0,
+	time.Millisecond * 10,
+	time.Millisecond * 100,
+	time.Millisecond * 1000,
+	time.Millisecond * 5000,
+}
+
 type worker struct {
 	workerID    string
 	poolID      string
@@ -97,8 +105,6 @@ func (w *worker) drain() {
 	w.observer.drain()
 }
 
-var sleepBackoffsInMilliseconds = []int64{0, 10, 100, 1000, 5000}
-
 func (w *worker) loop() {
 	var drained bool
 	var consequtiveNoJobs int64
@@ -131,10 +137,10 @@ func (w *worker) loop() {
 				}
 				consequtiveNoJobs++
 				idx := consequtiveNoJobs
-				if idx >= int64(len(sleepBackoffsInMilliseconds)) {
-					idx = int64(len(sleepBackoffsInMilliseconds)) - 1
+				if idx >= int64(len(sleepBackoffs)) {
+					idx = int64(len(sleepBackoffs)) - 1
 				}
-				timer.Reset(time.Duration(sleepBackoffsInMilliseconds[idx]) * time.Millisecond)
+				timer.Reset(sleepBackoffs[idx])
 			}
 		}
 	}
@@ -192,6 +198,7 @@ func (w *worker) processJob(job *Job) {
 	if job.Unique {
 		w.deleteUniqueJob(job)
 	}
+
 	var runErr error
 	jt := w.jobTypes[job.Name]
 	if jt == nil {
@@ -209,14 +216,26 @@ func (w *worker) processJob(job *Job) {
 		job.failed(runErr)
 		fate = w.jobFate(jt, job)
 	}
-	w.removeJobFromInProgress(job, fate)
+
+	// Since we've taken the task and completed it, we must keep retrying commits
+	// until we succeed, otherwise we'll end up with block job.
+	retryErr(sleepBackoffs, func() error {
+		err := w.removeJobFromInProgress(job, fate)
+		if err != nil {
+			logError("worker.remove_job_from_in_progress.lrem", err)
+		}
+
+		return err
+	})
 }
 
 func (w *worker) deleteUniqueJob(job *Job) {
 	uniqueKey, err := redisKeyUniqueJob(w.namespace, job.Name, job.Args)
 	if err != nil {
 		logError("worker.delete_unique_job.key", err)
+		return
 	}
+
 	conn := w.pool.Get()
 	defer conn.Close()
 
@@ -226,7 +245,7 @@ func (w *worker) deleteUniqueJob(job *Job) {
 	}
 }
 
-func (w *worker) removeJobFromInProgress(job *Job, fate terminateOp) {
+func (w *worker) removeJobFromInProgress(job *Job, fate terminateOp) error {
 	conn := w.pool.Get()
 	defer conn.Close()
 
@@ -235,14 +254,29 @@ func (w *worker) removeJobFromInProgress(job *Job, fate terminateOp) {
 	conn.Send("DECR", redisKeyJobsLock(w.namespace, job.Name))
 	conn.Send("HINCRBY", redisKeyJobsLockInfo(w.namespace, job.Name), w.poolID, -1)
 	fate(conn)
-	if _, err := conn.Do("EXEC"); err != nil {
-		logError("worker.remove_job_from_in_progress.lrem", err)
+
+	_, err := conn.Do("EXEC")
+
+	return err
+}
+
+func (w *worker) jobFate(jt *jobType, job *Job) terminateOp {
+	if jt != nil {
+		failsRemaining := int64(jt.MaxFails) - job.Fails
+		if failsRemaining > 0 {
+			return terminateAndRetry(w, jt, job)
+		}
+		if jt.SkipDead {
+			return terminateOnly
+		}
 	}
+	return terminateAndDead(w, job)
 }
 
 type terminateOp func(conn redis.Conn)
 
-func terminateOnly(_ redis.Conn) { return }
+func terminateOnly(_ redis.Conn) {}
+
 func terminateAndRetry(w *worker, jt *jobType, job *Job) terminateOp {
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -253,6 +287,7 @@ func terminateAndRetry(w *worker, jt *jobType, job *Job) terminateOp {
 		conn.Send("ZADD", redisKeyRetry(w.namespace), nowEpochSeconds()+jt.calcBackoff(job), rawJSON)
 	}
 }
+
 func terminateAndDead(w *worker, job *Job) terminateOp {
 	rawJSON, err := job.serialize()
 	if err != nil {
@@ -269,21 +304,27 @@ func terminateAndDead(w *worker, job *Job) terminateOp {
 	}
 }
 
-func (w *worker) jobFate(jt *jobType, job *Job) terminateOp {
-	if jt != nil {
-		failsRemaining := int64(jt.MaxFails) - job.Fails
-		if failsRemaining > 0 {
-			return terminateAndRetry(w, jt, job)
-		}
-		if jt.SkipDead {
-			return terminateOnly
-		}
-	}
-	return terminateAndDead(w, job)
-}
-
 // Default algorithm returns an fastly increasing backoff counter which grows in an unbounded fashion
 func defaultBackoffCalculator(job *Job) int64 {
 	fails := job.Fails
 	return (fails * fails * fails * fails) + 15 + (rand.Int63n(30) * (fails + 1))
+}
+
+// retryErr retries fn until success.
+func retryErr(backoffs []time.Duration, fn func() error) {
+	for attempt := 0; ; attempt++ {
+		err := fn()
+		if err == nil {
+			break
+		}
+
+		if len(backoffs) != 0 {
+			idx := attempt
+			if idx >= len(backoffs) {
+				idx = len(backoffs) - 1
+			}
+
+			time.Sleep(backoffs[idx])
+		}
+	}
 }

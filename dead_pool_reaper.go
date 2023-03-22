@@ -15,7 +15,7 @@ import (
 
 const (
 	deadTime          = 10 * time.Second // 2 x heartbeat
-	reapPeriod        = 10 * time.Minute
+	defaultReapPeriod = 1 * time.Minute
 	reapJitterSecs    = 30
 	requeueKeysPerJob = 4
 )
@@ -31,7 +31,11 @@ type deadPoolReaper struct {
 	doneStoppingChan chan struct{}
 }
 
-func newDeadPoolReaper(namespace string, pool Pool, curJobTypes []string) *deadPoolReaper {
+func newDeadPoolReaper(namespace string, pool Pool, curJobTypes []string, reapPeriod time.Duration) *deadPoolReaper {
+	if reapPeriod == 0 {
+		reapPeriod = defaultReapPeriod
+	}
+
 	return &deadPoolReaper{
 		namespace:        namespace,
 		pool:             pool,
@@ -53,6 +57,8 @@ func (r *deadPoolReaper) stop() {
 }
 
 func (r *deadPoolReaper) loop() {
+	Logger.Printf("Reaper: started with a period of %v", r.reapPeriod)
+
 	// Reap immediately after we provide some time for initialization
 	timer := time.NewTimer(r.deadTime)
 	defer timer.Stop()
@@ -80,6 +86,8 @@ func (r *deadPoolReaper) reap() (err error) {
 		return err
 	}
 
+	Logger.Printf("Reaper: trying to acquire lock...")
+
 	acquired, err := r.acquireLock(lockValue)
 	if err != nil {
 		return err
@@ -87,8 +95,11 @@ func (r *deadPoolReaper) reap() (err error) {
 
 	// Another reaper is already running
 	if !acquired {
+		Logger.Printf("Reaper: locked by another process")
 		return nil
 	}
+
+	Logger.Printf("Reaper: lock is acquired")
 
 	defer func() {
 		err = r.releaseLock(lockValue)
@@ -107,6 +118,8 @@ func (r *deadPoolReaper) reapDeadPools() error {
 	if err != nil {
 		return err
 	}
+
+	Logger.Printf("Reaper: dead pools: %v", deadPoolIDs)
 
 	conn := r.pool.Get()
 	defer conn.Close()
@@ -149,6 +162,8 @@ func (r *deadPoolReaper) clearUnknownPools() error {
 	if err != nil {
 		return err
 	}
+
+	Logger.Printf("Reaper: unknown pools: %v", unknownPools)
 
 	for poolID, jobTypes := range unknownPools {
 		if err = r.requeueInProgressJobs(poolID, jobTypes); err != nil {
