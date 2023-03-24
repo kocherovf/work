@@ -440,3 +440,37 @@ end
 
 return cjson.encode(unknownPools)
 `)
+
+// Used by the reaper to DECR dangling locks. Returns the dangling lock keys that
+// have been fixed.
+//
+// KEYS[1] = job's lock key
+// KEYS[2...] = job's lock info key
+// Returns: ["ns:jobs:job1:lock", "ns:jobs:job3:lock"]
+var redisRemoveDanglingLocksScript = redis.NewScript(-1, `
+local danglingLocks = {}
+
+for i=1,#KEYS,2 do
+    local lockKey = KEYS[i]
+    local lockInfoKey = KEYS[i+1]
+
+    local rlocks = redis.call('get', lockKey)
+    if rlocks ~= false then
+        local locks = tonumber(rlocks)
+        local lockInfo = redis.call('hvals', lockInfoKey)
+
+        local totalLocks = 0
+        for j=1,#lockInfo do
+            totalLocks = totalLocks + tonumber(lockInfo[j])
+        end
+
+        local diff = locks - totalLocks
+        if diff ~= 0 then
+            table.insert(danglingLocks, lockKey)
+            redis.call('decrby', lockKey, diff)
+        end
+    end
+end
+
+return danglingLocks
+`)

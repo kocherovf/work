@@ -15,7 +15,7 @@ import (
 
 const (
 	deadTime          = 10 * time.Second // 2 x heartbeat
-	defaultReapPeriod = 1 * time.Minute
+	defaultReapPeriod = 5 * time.Minute
 	reapJitterSecs    = 30
 	requeueKeysPerJob = 4
 )
@@ -72,7 +72,6 @@ func (r *deadPoolReaper) loop() {
 			// Schedule next occurrence periodically with jitter
 			timer.Reset(r.reapPeriod + time.Duration(rand.Intn(reapJitterSecs))*time.Second)
 
-			// Reap
 			if err := r.reap(); err != nil {
 				logError("dead_pool_reaper.reap", err)
 			}
@@ -90,6 +89,7 @@ func (r *deadPoolReaper) reap() (err error) {
 
 	acquired, err := r.acquireLock(lockValue)
 	if err != nil {
+		Logger.Printf("Reaper: acquiring lock: %v", err)
 		return err
 	}
 
@@ -108,7 +108,12 @@ func (r *deadPoolReaper) reap() (err error) {
 	rErr := r.reapDeadPools()
 	cErr := r.clearUnknownPools()
 
-	return multierr.Combine(rErr, cErr)
+	// TODO: consider refactoring requeueInProgressJobs and cleanStaleLockInfo
+	// and removing removeDanglingLocks. There was a block where lock is 1 and
+	// lock_info is 0.
+	dErr := r.removeDanglingLocks()
+
+	return multierr.Combine(err, rErr, cErr, dErr)
 }
 
 // reapDeadPools collects the IDs of expired heartbeat pools and releases the
@@ -306,6 +311,31 @@ func (r *deadPoolReaper) getUnknownPools() (map[string][]string, error) {
 	}
 
 	return pools, nil
+}
+
+// removeDanglingLocks adjusts the lock keys according to the lock_info numbers.
+// TODO: it's better to find where the inconsistency comes from.
+func (r *deadPoolReaper) removeDanglingLocks() error {
+	keysCount := len(r.curJobTypes) * 2               // lock and lock_info keys
+	scriptArgs := make([]interface{}, 0, keysCount+1) // +1 for keys count arg
+	scriptArgs = append(scriptArgs, keysCount)
+
+	for _, j := range r.curJobTypes {
+		scriptArgs = append(scriptArgs, redisKeyJobsLock(r.namespace, j))
+		scriptArgs = append(scriptArgs, redisKeyJobsLockInfo(r.namespace, j))
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	keys, err := redis.Strings(redisRemoveDanglingLocksScript.Do(conn, scriptArgs...))
+	if err != nil {
+		return err
+	}
+
+	Logger.Printf("Reaper: dangling locks: %v", keys)
+
+	return nil
 }
 
 // acquireLock acquires lock with a value and an expiration time for reap period.

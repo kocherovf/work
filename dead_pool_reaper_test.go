@@ -551,3 +551,62 @@ func TestDeadPoolReaperClearUnknownPool(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, map[string]string{workerPoolID1: "0"}, nLockInfo2)
 }
+
+func TestDeadPoolReaperRemoveDanglingLocks(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	cleanKeyspace(ns, pool)
+
+	workerPoolID1, workerPoolID2 := "1", "2"
+
+	job1, job2, job3, job4 := "type1", "type2", "type3", "type4"
+	jobNames := []string{job1, job2, job3, job4}
+	lock1, lock2, lock3 := redisKeyJobsLock(ns, job1), redisKeyJobsLock(ns, job2), redisKeyJobsLock(ns, job3)
+	lockInfo1, lockInfo2 := redisKeyJobsLockInfo(ns, job1), redisKeyJobsLockInfo(ns, job2)
+
+	conn := pool.Get()
+	defer conn.Close()
+
+	// Create redis data
+	var err error
+
+	err = conn.Send("SET", lock1, 4) // One dangling lock
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo1,
+		workerPoolID1, 2,
+		workerPoolID2, 1,
+	)
+	assert.NoError(t, err)
+
+	err = conn.Send("SET", lock2, 1) // No dangling locks
+	assert.NoError(t, err)
+
+	err = conn.Send("HMSET", lockInfo2,
+		workerPoolID1, 0,
+		workerPoolID2, 1,
+	)
+	assert.NoError(t, err)
+
+	err = conn.Send("SET", lock3, 1) // One dangling lock
+	assert.NoError(t, err)
+
+	assert.NoError(t, conn.Flush())
+
+	reaper := newDeadPoolReaper(ns, pool, jobNames, 0)
+	err = reaper.removeDanglingLocks()
+	assert.NoError(t, err)
+
+	// Checks
+	nLock1, err := redis.Int(conn.Do("GET", lock1))
+	assert.NoError(t, err)
+	assert.Equal(t, 3, nLock1)
+
+	nLock2, err := redis.Int(conn.Do("GET", lock2))
+	assert.NoError(t, err)
+	assert.Equal(t, 1, nLock2)
+
+	nLock3, err := redis.Int(conn.Do("GET", lock3))
+	assert.NoError(t, err)
+	assert.Equal(t, 0, nLock3)
+}
