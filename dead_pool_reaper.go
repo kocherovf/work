@@ -15,7 +15,7 @@ import (
 
 const (
 	deadTime          = 10 * time.Second // 2 x heartbeat
-	reapPeriod        = 10 * time.Minute
+	defaultReapPeriod = 5 * time.Minute
 	reapJitterSecs    = 30
 	requeueKeysPerJob = 4
 )
@@ -31,7 +31,11 @@ type deadPoolReaper struct {
 	doneStoppingChan chan struct{}
 }
 
-func newDeadPoolReaper(namespace string, pool Pool, curJobTypes []string) *deadPoolReaper {
+func newDeadPoolReaper(namespace string, pool Pool, curJobTypes []string, reapPeriod time.Duration) *deadPoolReaper {
+	if reapPeriod == 0 {
+		reapPeriod = defaultReapPeriod
+	}
+
 	return &deadPoolReaper{
 		namespace:        namespace,
 		pool:             pool,
@@ -53,6 +57,8 @@ func (r *deadPoolReaper) stop() {
 }
 
 func (r *deadPoolReaper) loop() {
+	Logger.Printf("Reaper: started with a period of %v", r.reapPeriod)
+
 	// Reap immediately after we provide some time for initialization
 	timer := time.NewTimer(r.deadTime)
 	defer timer.Stop()
@@ -66,7 +72,6 @@ func (r *deadPoolReaper) loop() {
 			// Schedule next occurrence periodically with jitter
 			timer.Reset(r.reapPeriod + time.Duration(rand.Intn(reapJitterSecs))*time.Second)
 
-			// Reap
 			if err := r.reap(); err != nil {
 				logError("dead_pool_reaper.reap", err)
 			}
@@ -80,15 +85,21 @@ func (r *deadPoolReaper) reap() (err error) {
 		return err
 	}
 
+	Logger.Printf("Reaper: trying to acquire lock...")
+
 	acquired, err := r.acquireLock(lockValue)
 	if err != nil {
+		Logger.Printf("Reaper: acquiring lock: %v", err)
 		return err
 	}
 
 	// Another reaper is already running
 	if !acquired {
+		Logger.Printf("Reaper: locked by another process")
 		return nil
 	}
+
+	Logger.Printf("Reaper: lock is acquired")
 
 	defer func() {
 		err = r.releaseLock(lockValue)
@@ -97,7 +108,12 @@ func (r *deadPoolReaper) reap() (err error) {
 	rErr := r.reapDeadPools()
 	cErr := r.clearUnknownPools()
 
-	return multierr.Combine(rErr, cErr)
+	// TODO: consider refactoring requeueInProgressJobs and cleanStaleLockInfo
+	// and removing removeDanglingLocks. There was a block where lock is 1 and
+	// lock_info is 0.
+	dErr := r.removeDanglingLocks()
+
+	return multierr.Combine(err, rErr, cErr, dErr)
 }
 
 // reapDeadPools collects the IDs of expired heartbeat pools and releases the
@@ -107,6 +123,8 @@ func (r *deadPoolReaper) reapDeadPools() error {
 	if err != nil {
 		return err
 	}
+
+	Logger.Printf("Reaper: dead pools: %v", deadPoolIDs)
 
 	conn := r.pool.Get()
 	defer conn.Close()
@@ -149,6 +167,8 @@ func (r *deadPoolReaper) clearUnknownPools() error {
 	if err != nil {
 		return err
 	}
+
+	Logger.Printf("Reaper: unknown pools: %v", unknownPools)
 
 	for poolID, jobTypes := range unknownPools {
 		if err = r.requeueInProgressJobs(poolID, jobTypes); err != nil {
@@ -291,6 +311,31 @@ func (r *deadPoolReaper) getUnknownPools() (map[string][]string, error) {
 	}
 
 	return pools, nil
+}
+
+// removeDanglingLocks adjusts the lock keys according to the lock_info numbers.
+// TODO: it's better to find where the inconsistency comes from.
+func (r *deadPoolReaper) removeDanglingLocks() error {
+	keysCount := len(r.curJobTypes) * 2               // lock and lock_info keys
+	scriptArgs := make([]interface{}, 0, keysCount+1) // +1 for keys count arg
+	scriptArgs = append(scriptArgs, keysCount)
+
+	for _, j := range r.curJobTypes {
+		scriptArgs = append(scriptArgs, redisKeyJobsLock(r.namespace, j))
+		scriptArgs = append(scriptArgs, redisKeyJobsLockInfo(r.namespace, j))
+	}
+
+	conn := r.pool.Get()
+	defer conn.Close()
+
+	keys, err := redis.Strings(redisRemoveDanglingLocksScript.Do(conn, scriptArgs...))
+	if err != nil {
+		return err
+	}
+
+	Logger.Printf("Reaper: dangling locks: %v", keys)
+
+	return nil
 }
 
 // acquireLock acquires lock with a value and an expiration time for reap period.

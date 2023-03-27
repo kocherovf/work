@@ -2,7 +2,10 @@ package work
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -329,7 +332,7 @@ func TestWorkersPaused(t *testing.T) {
 	err = pauseJobs(ns, job1, pool)
 	assert.Nil(t, err)
 	// reset the backoff times to help with testing
-	sleepBackoffsInMilliseconds = []int64{10, 10, 10, 10, 10}
+	sleepBackoffs = []time.Duration{time.Millisecond * 10}
 	w.start()
 
 	// make sure the jobs stay in the still in the run queue and not moved to in progress
@@ -630,4 +633,103 @@ func TestWorkerPoolStop(t *testing.T) {
 	if started >= int32(num_iters) {
 		t.Errorf("Expected that jobs queue was not completely emptied.")
 	}
+}
+
+func TestWorkerRetryRemoveFromInProgress(t *testing.T) {
+	Logger = log.Default()
+
+	originPool := newTestPool(":6379")
+	pool := newSwitchablePool(originPool)
+	ns := "work"
+	job1 := "job1"
+
+	cleanKeyspace(ns, originPool)
+
+	// reset the backoff times to help with testing
+	sleepBackoffs = []time.Duration{time.Millisecond * 10}
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	jobTypes := map[string]*jobType{
+		job1: {
+			Name:       job1,
+			JobOptions: JobOptions{Priority: 1},
+			isGeneric:  true,
+			genericHandler: func(job *Job) error {
+				defer wg.Done()
+
+				// Connection loss emulation.
+				pool.Off()
+
+				return nil
+			},
+		},
+	}
+
+	enqueuer := NewEnqueuer(ns, pool)
+	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
+	assert.Nil(t, err)
+
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes)
+	w.start()
+	defer w.stop()
+
+	wg.Wait()
+
+	// One job still in progress.
+	assert.EqualValues(t, 1, listSize(originPool, redisKeyJobsInProgress(ns, "1", job1)))
+
+	pool.On()
+	time.Sleep(time.Millisecond * 10)
+
+	// Nothing in retries or dead.
+	assert.EqualValues(t, 0, zsetSize(originPool, redisKeyRetry(ns)))
+	assert.EqualValues(t, 0, zsetSize(originPool, redisKeyDead(ns)))
+
+	// Nothing in the queues or in-progress queues.
+	assert.EqualValues(t, 0, listSize(originPool, redisKeyJobs(ns, job1)))
+	assert.EqualValues(t, 0, listSize(originPool, redisKeyJobsInProgress(ns, "1", job1)))
+}
+
+type switchablePool struct {
+	pool Pool
+	off  atomic.Bool
+}
+
+func newSwitchablePool(pool Pool) *switchablePool {
+	return &switchablePool{pool: pool}
+}
+
+func (p *switchablePool) Get() redis.Conn {
+	return &switchableConn{p.pool.Get(), &p.off}
+}
+
+func (p *switchablePool) On() {
+	p.off.Store(false)
+}
+
+func (p *switchablePool) Off() {
+	p.off.Store(true)
+}
+
+type switchableConn struct {
+	redis.Conn
+	off *atomic.Bool
+}
+
+func (c *switchableConn) Do(commandName string, args ...interface{}) (reply interface{}, err error) {
+	if !c.off.Load() {
+		return c.Conn.Do(commandName, args...)
+	}
+
+	return nil, io.EOF
+}
+
+func (c *switchableConn) Send(commandName string, args ...interface{}) error {
+	if !c.off.Load() {
+		return c.Conn.Send(commandName, args...)
+	}
+
+	return io.EOF
 }
