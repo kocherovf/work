@@ -168,15 +168,61 @@ for i=1,keylen,%d do
 end
 return nil`, fetchKeysPerJobType)
 
+// Used to remove job from the in-progress queue.
+//
+// KEYS[1] = in-progress job queue
+// KEYS[2] = job's lock key
+// KEYS[3] = job's lock info key
+// KEYS[4] = forward queue
+// ARGV[1] = worker pool id
+// ARGV[2] = job value
+// ARGV[3] = should the failed job be redirected to another queue?
+// ARGV[4] = failed job score
+// ARGV[5] = failed job value
+var redisRemoveJobFromInProgress = redis.NewScript(4, `
+local function releaseLock(lockKey, lockInfoKey, workerPoolID)
+  redis.call('decr', lockKey)
+  redis.call('hincrby', lockInfoKey, workerPoolID, -1)
+end
+
+local inProgQueue = KEYS[1]
+local lockKey = KEYS[2]
+local lockInfoKey = KEYS[3]
+local workerPoolID = ARGV[1]
+local job = ARGV[2]
+local forward = ARGV[3]
+local result = tonumber(redis.call('lrem', inProgQueue, 1, job))
+
+if result ~= 0 then
+  releaseLock(lockKey, lockInfoKey, workerPoolID)
+
+  if forward then
+    local queue = KEYS[4]
+    local score = ARGV[4]
+    local failedJob = ARGV[5]
+
+    redis.call('zadd', queue, score, failedJob)
+  end
+end
+
+return nil
+`)
+
 // Used by the reaper to re-enqueue jobs that were in progress
 //
 // KEYS[1] = the 1st job's in progress queue
 // KEYS[2] = the 1st job's job queue
-// KEYS[3] = the 2nd job's in progress queue
-// KEYS[4] = the 2nd job's job queue
+// KEYS[3] = the 1nd job's lock key
+// KEYS[4] = the 1nd job's lock info key
+// KEYS[5] = the 2st job's in progress queue
+// KEYS[6] = the 2st job's job queue
+// KEYS[7] = the 2nd job's lock key
+// KEYS[8] = the 2nd job's lock info key
 // ...
 // KEYS[N] = the last job's in progress queue
 // KEYS[N+1] = the last job's job queue
+// KEYS[N+2] = the last job's lock key
+// KEYS[N+3] = the last job's lock info key
 // ARGV[1] = workerPoolID for job queue
 var redisLuaReenqueueJob = fmt.Sprintf(`
 local function releaseLock(lockKey, lockInfoKey, workerPoolID)
@@ -211,10 +257,12 @@ return nil`, requeueKeysPerJob)
 // KEYS[N] = the last job's lock
 // KEYS[N+1] = the last job's lock info haash
 // ARGV[1] = the dead worker pool id
+// Returns: list of negative locks (which were set to zero)
 var redisLuaReapStaleLocks = `
 local keylen = #KEYS
 local lock, lockInfo, deadLockCount
 local deadPoolID = ARGV[1]
+local negativeLocks = {}
 
 for i=1,keylen,2 do
   lock = KEYS[i]
@@ -226,11 +274,13 @@ for i=1,keylen,2 do
     redis.call('hdel', lockInfo, deadPoolID)
 
     if tonumber(redis.call('get', lock)) < 0 then
+      table.insert(negativeLocks, lock)
       redis.call('set', lock, 0)
     end
   end
 end
-return nil
+
+return negativeLocks
 `
 
 // KEYS[1] = zset of jobs (retry or scheduled), eg work:retry
