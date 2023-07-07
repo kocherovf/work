@@ -1,7 +1,9 @@
 package work
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/robfig/cron/v3"
 	"github.com/stretchr/testify/assert"
@@ -111,4 +113,39 @@ func TestRequeuePeriodic(t *testing.T) {
 
 	llen := listSize(pool, redisKeyJobs(ns, jobName))
 	assert.Equal(t, int64(0), llen)
+}
+
+func TestRequeueSlowJob(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	cleanKeyspace(ns, pool)
+
+	jobName := "test_job"
+	jobSpec := "*/1 * * * * *"
+
+	wp := NewWorkerPool(struct{}{}, 1, ns, pool)
+	defer wp.Stop()
+
+	wp.PeriodicallyEnqueue(jobSpec, jobName)
+
+	block := make(chan struct{})
+	runned := make(chan struct{})
+
+	wp.JobWithOptions(jobName, JobOptions{MaxConcurrency: 1}, func(context.Context, *Job) error {
+		close(runned)
+		<-block
+		return nil
+	})
+
+	wp.Start()
+	defer func() {
+		close(block)
+		wp.Stop()
+	}()
+	<-runned
+
+	time.Sleep(time.Second * 2)
+
+	llen := listSize(pool, redisKeyJobs(ns, jobName))
+	assert.LessOrEqual(t, llen, int64(1))
 }

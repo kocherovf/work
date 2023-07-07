@@ -299,12 +299,24 @@ if #res > 0 then
   redis.call('zrem', KEYS[1], res[1])
   queue = ARGV[1] .. j['name']
 
-  for _,v in pairs(KEYS) do
+  for i=3,#KEYS do
+    local v = KEYS[i]
     if v == queue then
       -- If for some reason (e.g., the service was offline) the periodic job was
       -- not executed, skip the execution.
       if j['d'] ~= nil and nowTs > j['d'] then
         return 'ok'
+      end
+
+      -- If the next task in the queue has expired, discard it.
+      local nextTask = redis.call('rpop', queue)
+      if nextTask then
+        local decNextTask = cjson.decode(nextTask)
+        local deadline = decNextTask['d']
+        -- Return to the queue if the deadline is not set or has not expired.
+        if deadline == nil or nowTs < deadline then
+            redis.call('rpush', queue, nextTask)
+        end
       end
 
       j['t'] = nowTs
