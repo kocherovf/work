@@ -190,7 +190,7 @@ local lockKey = KEYS[2]
 local lockInfoKey = KEYS[3]
 local workerPoolID = ARGV[1]
 local job = ARGV[2]
-local forward = ARGV[3]
+local forward = ARGV[3] == '1'
 local result = tonumber(redis.call('lrem', inProgQueue, 1, job))
 
 if result ~= 0 then
