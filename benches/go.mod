@@ -1,6 +1,6 @@
 module github.com/sbermarket-tech/work/benches
 
-go 1.17
+go 1.21
 
 replace github.com/sbermarket-tech/work => ../
 
