@@ -71,6 +71,10 @@ func redisKeyJobsLock(namespace, jobName string) string {
 	return redisKeyJobs(namespace, jobName) + ":lock"
 }
 
+func redisJobNameFromLockKey(namespace, key string) string {
+	return redisJobNameFromKey(namespace, strings.TrimSuffix(key, ":lock"))
+}
+
 func redisKeyJobsLockInfo(namespace, jobName string) string {
 	return redisKeyJobs(namespace, jobName) + ":lock_info"
 }
