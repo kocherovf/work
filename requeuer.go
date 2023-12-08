@@ -1,7 +1,7 @@
 package work
 
 import (
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -19,9 +19,17 @@ type requeuer struct {
 
 	drainChan        chan struct{}
 	doneDrainingChan chan struct{}
+
+	logger StructuredLogger
 }
 
-func newRequeuer(namespace string, pool Pool, requeueKey string, jobNames []string) *requeuer {
+func newRequeuer(
+	namespace string,
+	pool Pool,
+	requeueKey string,
+	jobNames []string,
+	logger StructuredLogger,
+) *requeuer {
 	args := make([]interface{}, 0, len(jobNames)+2+2)
 	args = append(args, requeueKey)              // KEY[1]
 	args = append(args, redisKeyDead(namespace)) // KEY[2]
@@ -43,6 +51,8 @@ func newRequeuer(namespace string, pool Pool, requeueKey string, jobNames []stri
 
 		drainChan:        make(chan struct{}),
 		doneDrainingChan: make(chan struct{}),
+
+		logger: logger,
 	}
 }
 
@@ -94,14 +104,14 @@ func (r *requeuer) process() bool {
 	if err == redis.ErrNil {
 		return false
 	} else if err != nil {
-		logError("requeuer.process", err)
+		r.logger.Error("requeuer.process", errAttr(err))
 		return false
 	}
 
 	if res == "" {
 		return false
 	} else if res == "dead" {
-		logError("requeuer.process.dead", fmt.Errorf("no job name"))
+		r.logger.Error("requeuer.process.dead", slog.String("error", "no job name"))
 		return true
 	} else if res == "ok" {
 		return true

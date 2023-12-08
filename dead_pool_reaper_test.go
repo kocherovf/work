@@ -49,7 +49,7 @@ func TestDeadPoolReaper(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test getting dead pool
-	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil, noopLogger)
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
 	assert.Equal(t, poolsJobs{"2": {"type1", "type2"}, "3": {"type1", "type2"}}, deadPools)
@@ -128,7 +128,7 @@ func TestDeadPoolReaperNoHeartbeat(t *testing.T) {
 	assert.EqualValues(t, 3, numPools)
 
 	// Test getting dead pool ids
-	reaper := newDeadPoolReaper(ns, pool, []string{"type1"}, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, []string{"type1"}, 0, nil, noopLogger)
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
 	assert.Equal(t, poolsJobs{"1": nil, "2": nil, "3": nil}, deadPools)
@@ -211,7 +211,7 @@ func TestDeadPoolReaperNoJobTypes(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test getting dead pool
-	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil, noopLogger)
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
 	assert.Equal(t, poolsJobs{"2": {"type1", "type2"}}, deadPools)
@@ -272,7 +272,7 @@ func TestDeadPoolReaperWithWorkerPools(t *testing.T) {
 	_, err = conn.Do("LPUSH", redisKeyJobsInProgress(ns, stalePoolID, job1), `{"sleep": 10}`)
 	assert.NoError(t, err)
 	jobTypes := map[string]*jobType{"job1": nil}
-	staleHeart := newWorkerPoolHeartbeater(ns, pool, stalePoolID, jobTypes, 1, []string{"id1"})
+	staleHeart := newWorkerPoolHeartbeater(ns, pool, stalePoolID, jobTypes, 1, []string{"id1"}, noopLogger)
 	staleHeart.start()
 
 	// heartbeat dispatched immediately but reaper waits for deadTime before first run
@@ -284,7 +284,7 @@ func TestDeadPoolReaperWithWorkerPools(t *testing.T) {
 
 	// setup a worker pool and start the reaper, which should restart the stale job above
 	wp := setupTestWorkerPool(pool, ns, job1, 1, JobOptions{Priority: 1})
-	wp.deadPoolReaper = newDeadPoolReaper(wp.namespace, wp.pool, []string{"job1"}, 0, nil)
+	wp.deadPoolReaper = newDeadPoolReaper(wp.namespace, wp.pool, []string{"job1"}, 0, nil, noopLogger)
 	wp.deadPoolReaper.deadTime = expectedDeadTime
 	wp.deadPoolReaper.start()
 
@@ -328,7 +328,7 @@ func TestDeadPoolReaperCleanStaleLocks(t *testing.T) {
 	err = conn.Flush()
 	assert.NoError(t, err)
 
-	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil, noopLogger)
 	// clean lock info for workerPoolID1
 	err = reaper.cleanStaleLockInfo(workerPoolID1, jobNames)
 	assert.NoError(t, err)
@@ -387,7 +387,7 @@ func TestDeadPoolReaperTakeDeadPools(t *testing.T) {
 	assert.NoError(t, err)
 
 	// Test getting dead pools
-	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil, noopLogger)
 	deadPools, err := reaper.findDeadPools()
 	assert.NoError(t, err)
 	assert.Equal(t, poolsJobs{"2": {"type1", "type2"}, "3": nil}, deadPools)
@@ -398,7 +398,7 @@ func TestReaperLock(t *testing.T) {
 	ns := "work"
 	cleanKeyspace(ns, pool)
 
-	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, []string{}, 0, nil, noopLogger)
 
 	value, err := genValue()
 	assert.NoError(t, err)
@@ -475,7 +475,7 @@ func TestDeadPoolReaperGetUnknownPools(t *testing.T) {
 	assert.NoError(t, conn.Flush())
 
 	// Run test
-	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil, noopLogger)
 	unknownPools, err := reaper.getUnknownPools()
 	assert.NoError(t, err)
 	assert.Equal(t, poolsJobs{"2": {"type1", "type2"}, "3": {"type1", "type2"}}, unknownPools)
@@ -534,7 +534,7 @@ func TestDeadPoolReaperClearUnknownPool(t *testing.T) {
 	assert.NoError(t, conn.Flush())
 
 	// Run test
-	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil, noopLogger)
 	_, err = reaper.clearUnknownPools()
 	assert.NoError(t, err)
 
@@ -596,7 +596,7 @@ func TestDeadPoolReaperRemoveDanglingLocks(t *testing.T) {
 
 	assert.NoError(t, conn.Flush())
 
-	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil)
+	reaper := newDeadPoolReaper(ns, pool, jobNames, 0, nil, noopLogger)
 	_, err = reaper.removeDanglingLocks()
 	assert.NoError(t, err)
 
@@ -663,6 +663,6 @@ func TestDeadPoolReaperHook(t *testing.T) {
 			assert.Equal(t, unknownPoolJobs, rr.UnknownPoolJobs)
 			assert.Equal(t, danglingLockJobs, rr.DanglingLockJobs)
 		}
-	})
+	}, noopLogger)
 	require.NoError(t, reaper.reap())
 }

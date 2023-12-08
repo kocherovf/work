@@ -2,7 +2,7 @@ package work
 
 import (
 	"encoding/json"
-	"fmt"
+	"log/slog"
 	"time"
 )
 
@@ -29,6 +29,8 @@ type observer struct {
 
 	drainChan        chan struct{}
 	doneDrainingChan chan struct{}
+
+	logger StructuredLogger
 }
 
 type observationKind int
@@ -60,7 +62,7 @@ type observation struct {
 
 const observerBufferSize = 1024
 
-func newObserver(namespace string, pool Pool, workerID string) *observer {
+func newObserver(namespace string, pool Pool, workerID string, logger StructuredLogger) *observer {
 	return &observer{
 		namespace:        namespace,
 		workerID:         workerID,
@@ -72,6 +74,8 @@ func newObserver(namespace string, pool Pool, workerID string) *observer {
 
 		drainChan:        make(chan struct{}),
 		doneDrainingChan: make(chan struct{}),
+
+		logger: logger,
 	}
 }
 
@@ -137,7 +141,7 @@ func (o *observer) loop() {
 					o.process(obv)
 				default:
 					if err := o.writeStatus(o.currentStartedObservation); err != nil {
-						logError("observer.write", err)
+						o.logger.Error("observer.write", errAttr(err))
 					}
 					o.doneDrainingChan <- struct{}{}
 					break DRAIN_LOOP
@@ -146,7 +150,7 @@ func (o *observer) loop() {
 		case <-ticker:
 			if o.lastWrittenVersion != o.version {
 				if err := o.writeStatus(o.currentStartedObservation); err != nil {
-					logError("observer.write", err)
+					o.logger.Error("observer.write", errAttr(err))
 				}
 				o.lastWrittenVersion = o.version
 			}
@@ -166,7 +170,10 @@ func (o *observer) process(obv *observation) {
 			o.currentStartedObservation.checkin = obv.checkin
 			o.currentStartedObservation.checkinAt = obv.checkinAt
 		} else {
-			logError("observer.checkin_mismatch", fmt.Errorf("got checkin but mismatch on job ID or no job"))
+			o.logger.Error("observer.checkin_mismatch", slog.String(
+				"error",
+				"got checkin but mismatch on job ID or no job",
+			))
 		}
 	}
 	o.version++
@@ -174,7 +181,7 @@ func (o *observer) process(obv *observation) {
 	// If this is the version observation we got, just go ahead and write it.
 	if o.version == 1 {
 		if err := o.writeStatus(o.currentStartedObservation); err != nil {
-			logError("observer.first_write", err)
+			o.logger.Error("observer.first_write", errAttr(err))
 		}
 		o.lastWrittenVersion = o.version
 	}

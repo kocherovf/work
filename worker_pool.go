@@ -35,6 +35,7 @@ type WorkerPool struct {
 	periodicEnqueuer *periodicEnqueuer
 
 	reaperHook ReaperHook
+	logger     StructuredLogger
 }
 
 type jobType struct {
@@ -113,6 +114,7 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 		pool:         pool,
 		contextType:  ctxType,
 		jobTypes:     make(map[string]*jobType),
+		logger:       noopLogger,
 	}
 
 	for _, opt := range opts {
@@ -120,7 +122,15 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 	}
 
 	for i := uint(0); i < wp.concurrency; i++ {
-		w := newWorker(wp.namespace, wp.workerPoolID, wp.pool, wp.contextType, nil, wp.jobTypes)
+		w := newWorker(
+			wp.namespace,
+			wp.workerPoolID,
+			wp.pool,
+			wp.contextType,
+			nil,
+			wp.jobTypes,
+			wp.logger,
+		)
 		wp.workers = append(wp.workers, w)
 	}
 
@@ -231,10 +241,23 @@ func (wp *WorkerPool) Start() {
 		go w.start()
 	}
 
-	wp.heartbeater = newWorkerPoolHeartbeater(wp.namespace, wp.pool, wp.workerPoolID, wp.jobTypes, wp.concurrency, wp.workerIDs())
+	wp.heartbeater = newWorkerPoolHeartbeater(
+		wp.namespace,
+		wp.pool,
+		wp.workerPoolID,
+		wp.jobTypes,
+		wp.concurrency,
+		wp.workerIDs(),
+		wp.logger,
+	)
 	wp.heartbeater.start()
 	wp.startRequeuers()
-	wp.periodicEnqueuer = newPeriodicEnqueuer(wp.namespace, wp.pool, wp.periodicJobs)
+	wp.periodicEnqueuer = newPeriodicEnqueuer(
+		wp.namespace,
+		wp.pool,
+		wp.periodicJobs,
+		wp.logger,
+	)
 	wp.periodicEnqueuer.start()
 }
 
@@ -280,14 +303,15 @@ func (wp *WorkerPool) startRequeuers() {
 		jobNames = append(jobNames, name)
 	}
 
-	wp.retrier = newRequeuer(wp.namespace, wp.pool, redisKeyRetry(wp.namespace), jobNames)
-	wp.scheduler = newRequeuer(wp.namespace, wp.pool, redisKeyScheduled(wp.namespace), jobNames)
+	wp.retrier = newRequeuer(wp.namespace, wp.pool, redisKeyRetry(wp.namespace), jobNames, wp.logger)
+	wp.scheduler = newRequeuer(wp.namespace, wp.pool, redisKeyScheduled(wp.namespace), jobNames, wp.logger)
 	wp.deadPoolReaper = newDeadPoolReaper(
 		wp.namespace,
 		wp.pool,
 		jobNames,
 		wp.reapPeriod,
 		wp.reaperHook,
+		wp.logger,
 	)
 	wp.retrier.start()
 	wp.scheduler.start()
@@ -318,7 +342,7 @@ func (wp *WorkerPool) writeKnownJobsToRedis() {
 	}
 
 	if _, err := conn.Do("SADD", jobNames...); err != nil {
-		logError("write_known_jobs", err)
+		wp.logger.Error("write_known_jobs", errAttr(err))
 	}
 }
 
@@ -331,7 +355,7 @@ func (wp *WorkerPool) writeConcurrencyControlsToRedis() {
 	defer conn.Close()
 	for jobName, jobType := range wp.jobTypes {
 		if _, err := conn.Do("SET", redisKeyJobsConcurrency(wp.namespace, jobName), jobType.MaxConcurrency); err != nil {
-			logError("write_concurrency_controls_max_concurrency", err)
+			wp.logger.Error("write_concurrency_controls_max_concurrency", errAttr(err))
 		}
 	}
 }
@@ -563,5 +587,12 @@ func WithReapPeriod(p time.Duration) WorkerPoolOption {
 func WithReaperHook(h ReaperHook) WorkerPoolOption {
 	return func(wp *WorkerPool) {
 		wp.reaperHook = h
+	}
+}
+
+// WithLogger registers logger.
+func WithLogger(l StructuredLogger) WorkerPoolOption {
+	return func(wp *WorkerPool) {
+		wp.logger = l
 	}
 }

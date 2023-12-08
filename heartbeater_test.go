@@ -21,7 +21,7 @@ func TestHeartbeater(t *testing.T) {
 		"bar": nil,
 	}
 
-	heart := newWorkerPoolHeartbeater(ns, pool, "abcd", jobTypes, 10, []string{"ccc", "bbb"})
+	heart := newWorkerPoolHeartbeater(ns, pool, "abcd", jobTypes, 10, []string{"ccc", "bbb"}, noopLogger)
 	heart.start()
 
 	time.Sleep(20 * time.Millisecond)
