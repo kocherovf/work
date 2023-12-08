@@ -33,6 +33,8 @@ type WorkerPool struct {
 	reapPeriod       time.Duration
 	deadPoolReaper   *deadPoolReaper
 	periodicEnqueuer *periodicEnqueuer
+
+	reaperHook ReaperHook
 }
 
 type jobType struct {
@@ -280,7 +282,13 @@ func (wp *WorkerPool) startRequeuers() {
 
 	wp.retrier = newRequeuer(wp.namespace, wp.pool, redisKeyRetry(wp.namespace), jobNames)
 	wp.scheduler = newRequeuer(wp.namespace, wp.pool, redisKeyScheduled(wp.namespace), jobNames)
-	wp.deadPoolReaper = newDeadPoolReaper(wp.namespace, wp.pool, jobNames, wp.reapPeriod)
+	wp.deadPoolReaper = newDeadPoolReaper(
+		wp.namespace,
+		wp.pool,
+		jobNames,
+		wp.reapPeriod,
+		wp.reaperHook,
+	)
 	wp.retrier.start()
 	wp.scheduler.start()
 	wp.deadPoolReaper.start()
@@ -548,5 +556,12 @@ type WorkerPoolOption func(wp *WorkerPool)
 func WithReapPeriod(p time.Duration) WorkerPoolOption {
 	return func(wp *WorkerPool) {
 		wp.reapPeriod = p
+	}
+}
+
+// WithReaperHook registers a hook to monitor the reaper's actions.
+func WithReaperHook(h ReaperHook) WorkerPoolOption {
+	return func(wp *WorkerPool) {
+		wp.reaperHook = h
 	}
 }
