@@ -8,7 +8,13 @@ import (
 
 // runJob returns an error if the job fails, or there's a panic, or we couldn't
 // reflect correctly. if we return an error, it signals we want the job to be retried.
-func runJob(job *Job, ctxType reflect.Type, middlewares []*middlewareHandler, jt *jobType) (returnCtx reflect.Value, returnError error) {
+func runJob(
+	job *Job,
+	ctxType reflect.Type,
+	middlewares []*middlewareHandler,
+	jt *jobType,
+	logger StructuredLogger,
+) (returnCtx reflect.Value, returnError error) {
 	returnCtx = reflect.New(ctxType)
 	ctx := job.extractTraceContext(context.Background())
 
@@ -41,7 +47,7 @@ func runJob(job *Job, ctxType reflect.Type, middlewares []*middlewareHandler, jt
 			// err turns out to be interface{}, of actual type "runtime.errorCString"
 			// Luckily, the err sprints nicely via fmt.
 			errorishError := fmt.Errorf("%v", panicErr)
-			logError("runJob.panic", errorishError)
+			logger.Error("runJob.panic", errAttr(errorishError))
 			returnError = errorishError
 		}
 	}()

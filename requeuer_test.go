@@ -32,7 +32,7 @@ func TestRequeue(t *testing.T) {
 
 	resetNowEpochSecondsMock()
 
-	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{"wat", "foo", "bar"})
+	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{"wat", "foo", "bar"}, noopLogger)
 	re.start()
 	re.drain()
 	re.stop()
@@ -68,7 +68,7 @@ func TestRequeueUnknown(t *testing.T) {
 	nowish := nowEpochSeconds()
 	setNowEpochSecondsMock(nowish)
 
-	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{"bar"})
+	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{"bar"}, noopLogger)
 	re.start()
 	re.drain()
 	re.stop()
@@ -97,7 +97,7 @@ func TestRequeuePeriodic(t *testing.T) {
 		{jobName: jobName, spec: jobSpec, schedule: shedule},
 	}
 
-	enq := newPeriodicEnqueuer(ns, pool, jobs)
+	enq := newPeriodicEnqueuer(ns, pool, jobs, noopLogger)
 	enq.start()
 	enq.stop()
 
@@ -106,7 +106,7 @@ func TestRequeuePeriodic(t *testing.T) {
 	setNowEpochSecondsMock(tMock)
 	defer resetNowEpochSecondsMock()
 
-	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{jobName})
+	re := newRequeuer(ns, pool, redisKeyScheduled(ns), []string{jobName}, noopLogger)
 	re.start()
 	re.drain()
 	re.stop()

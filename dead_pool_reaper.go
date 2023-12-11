@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"strings"
 	"time"
@@ -48,7 +49,8 @@ type deadPoolReaper struct {
 	stopChan         chan struct{}
 	doneStoppingChan chan struct{}
 
-	hook ReaperHook
+	hook   ReaperHook
+	logger StructuredLogger
 }
 
 func newDeadPoolReaper(
@@ -57,6 +59,7 @@ func newDeadPoolReaper(
 	curJobTypes []string,
 	reapPeriod time.Duration,
 	hook ReaperHook,
+	logger StructuredLogger,
 ) *deadPoolReaper {
 	if reapPeriod == 0 {
 		reapPeriod = defaultReapPeriod
@@ -71,6 +74,7 @@ func newDeadPoolReaper(
 		stopChan:         make(chan struct{}),
 		doneStoppingChan: make(chan struct{}),
 		hook:             hook,
+		logger:           logger,
 	}
 }
 
@@ -84,7 +88,7 @@ func (r *deadPoolReaper) stop() {
 }
 
 func (r *deadPoolReaper) loop() {
-	Logger.Printf("Reaper: started with a period of %v", r.reapPeriod)
+	r.logger.Info("Reaper started", slog.Duration("period", r.reapPeriod))
 
 	// Reap immediately after we provide some time for initialization
 	timer := time.NewTimer(r.deadTime)
@@ -100,7 +104,8 @@ func (r *deadPoolReaper) loop() {
 			timer.Reset(r.reapPeriod + time.Duration(rand.Intn(reapJitterSecs))*time.Second)
 
 			if err := r.reap(); err != nil {
-				logError("dead_pool_reaper.reap", err)
+				r.logger.Error("dead_pool_reaper.reap", errAttr(err))
+				// logError("dead_pool_reaper.reap", err)
 			}
 		}
 	}
@@ -112,21 +117,20 @@ func (r *deadPoolReaper) reap() (err error) {
 		return err
 	}
 
-	Logger.Printf("Reaper: trying to acquire lock...")
+	r.logger.Info("Reaper: trying to acquire lock...")
 
 	acquired, err := r.acquireLock(lockValue)
 	if err != nil {
-		Logger.Printf("Reaper: acquiring lock: %v", err)
-		return err
+		return fmt.Errorf("acquiring lock: %w", err)
 	}
 
 	// Another reaper is already running
 	if !acquired {
-		Logger.Printf("Reaper: locked by another process")
+		r.logger.Info("Reaper: locked by another process")
 		return nil
 	}
 
-	Logger.Printf("Reaper: lock is acquired")
+	r.logger.Info("Reaper: lock is acquired")
 
 	defer func() {
 		err = r.releaseLock(lockValue)
@@ -143,14 +147,14 @@ func (r *deadPoolReaper) reap() (err error) {
 
 	deadPools, rErr := r.reapDeadPools()
 	if jobs := deadPools.getAllJobs(); len(jobs) != 0 {
-		Logger.Printf("Reaper: dead pools: %v", deadPools)
+		r.logger.Info("Reaper: dead pools", slog.Any("dead", deadPools))
 
 		reapResult.NoPoolHeartBeatJobs = jobs
 	}
 
 	unknownPools, cErr := r.clearUnknownPools()
 	if jobs := unknownPools.getAllJobs(); len(jobs) != 0 {
-		Logger.Printf("Reaper: unknown pools: %v", unknownPools)
+		r.logger.Info("Reaper: unknown pools", slog.Any("unknown", unknownPools))
 
 		reapResult.UnknownPoolJobs = jobs
 	}
@@ -160,7 +164,7 @@ func (r *deadPoolReaper) reap() (err error) {
 	// lock_info is 0.
 	jobs, dErr := r.removeDanglingLocks()
 	if len(jobs) != 0 {
-		Logger.Printf("Reaper: dangling locks: %v", jobs)
+		r.logger.Info("Reaper: dangling locks", slog.Any("dangling", jobs))
 
 		reapResult.DanglingLockJobs = jobs
 	}

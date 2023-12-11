@@ -55,7 +55,7 @@ func TestRunBasicMiddleware(t *testing.T) {
 		Args: map[string]interface{}{"a": "foo"},
 	}
 
-	v, err := runJob(job, tstCtxType, middleware, jt)
+	v, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 	assert.NoError(t, err)
 	c := v.Interface().(*tstCtx)
 	assert.Equal(t, "mw1mw2mw3h1foo", c.String())
@@ -84,7 +84,7 @@ func TestRunHandlerError(t *testing.T) {
 		Name: "foo",
 	}
 
-	v, err := runJob(job, tstCtxType, middleware, jt)
+	v, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 	assert.Error(t, err)
 	assert.Equal(t, "h1_err", err.Error())
 
@@ -115,7 +115,7 @@ func TestRunMwError(t *testing.T) {
 		Name: "foo",
 	}
 
-	_, err := runJob(job, tstCtxType, middleware, jt)
+	_, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 	assert.Error(t, err)
 	assert.Equal(t, "mw1_err", err.Error())
 }
@@ -144,7 +144,7 @@ func TestRunHandlerPanic(t *testing.T) {
 		Name: "foo",
 	}
 
-	_, err := runJob(job, tstCtxType, middleware, jt)
+	_, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 	assert.Error(t, err)
 	assert.Equal(t, "dayam", err.Error())
 }
@@ -172,7 +172,7 @@ func TestRunMiddlewarePanic(t *testing.T) {
 		Name: "foo",
 	}
 
-	_, err := runJob(job, tstCtxType, middleware, jt)
+	_, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 	assert.Error(t, err)
 	assert.Equal(t, "dayam", err.Error())
 }
@@ -202,7 +202,7 @@ func TestRunGenericHandler(t *testing.T) {
 			genericHandler: h.handler,
 		}
 
-		_, err := runJob(job, tstCtxType, middleware, jt)
+		_, err := runJob(job, tstCtxType, middleware, jt, noopLogger)
 		if !h.mustFail {
 			assert.NoErrorf(t, err, "case: %d", i)
 		} else {
