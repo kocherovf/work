@@ -105,7 +105,6 @@ func (r *deadPoolReaper) loop() {
 
 			if err := r.reap(); err != nil {
 				r.logger.Error("dead_pool_reaper.reap", errAttr(err))
-				// logError("dead_pool_reaper.reap", err)
 			}
 		}
 	}
