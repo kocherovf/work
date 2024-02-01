@@ -258,7 +258,7 @@ func (r *deadPoolReaper) cleanStaleLockInfo(poolID string, jobTypes []string) er
 		return err
 	}
 	if len(negativeLocks) > 0 {
-		Logger.Printf("Reaper: negative locks: %v", negativeLocks)
+		r.logger.Info("Reaper: negative locks", slog.Any("keys", negativeLocks))
 	}
 
 	return nil

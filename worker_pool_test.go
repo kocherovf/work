@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"reflect"
 	"testing"
 	"time"
@@ -226,8 +225,6 @@ func TestWorkerPoolTracing(t *testing.T) {
 
 	ctx, span := tp.Tracer("").Start(context.Background(), "enqueue")
 	span.End()
-
-	Logger = log.Default()
 
 	enqueuer := NewEnqueuer(ns, pool)
 

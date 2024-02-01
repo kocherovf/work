@@ -3,7 +3,6 @@ package work
 import (
 	"fmt"
 	"io"
-	"log"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -636,8 +635,6 @@ func TestWorkerPoolStop(t *testing.T) {
 }
 
 func TestWorkerRetryRemoveFromInProgress(t *testing.T) {
-	Logger = log.Default()
-
 	originPool := newTestPool(":6379")
 	pool := newSwitchablePool(originPool)
 	ns := "work"
