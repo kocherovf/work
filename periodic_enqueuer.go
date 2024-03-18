@@ -2,6 +2,7 @@ package work
 
 import (
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -119,6 +120,12 @@ func (pe *periodicEnqueuer) enqueue() error {
 				// Set the next activation time as the deadline for the current one.
 				StartingDeadline: pj.schedule.Next(t).Unix(),
 			}
+
+			pe.logger.Debug("periodic_enqueuer.enqueue",
+				slog.Any("job_scheduled_time", t),
+				slog.String("job_name", pj.jobName),
+				slog.String("job_id", id),
+			)
 
 			rawJSON, err := job.serialize()
 			if err != nil {

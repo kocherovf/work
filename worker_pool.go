@@ -2,6 +2,7 @@ package work
 
 import (
 	"context"
+	"log/slog"
 	"reflect"
 	"sort"
 	"strings"
@@ -20,11 +21,13 @@ type WorkerPool struct {
 	namespace    string // eg, "myapp-work"
 	pool         Pool
 
-	contextType  reflect.Type
-	jobTypes     map[string]*jobType
-	middleware   []*middlewareHandler
-	started      bool
-	periodicJobs []*periodicJob
+	contextType                 reflect.Type
+	jobTypes                    map[string]*jobType
+	middleware                  []*middlewareHandler
+	started                     bool
+	periodicJobs                []*periodicJob
+	watchdog                    *watchdog
+	watchdogFailCheckingTimeout time.Duration
 
 	workers          []*worker
 	heartbeater      *workerPoolHeartbeater
@@ -121,6 +124,11 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 		opt(wp)
 	}
 
+	wp.watchdog = newWatchdog(
+		watchdogWithLogger(wp.logger),
+		watchdogWithFailCheckingTimeout(wp.watchdogFailCheckingTimeout),
+	)
+
 	for i := uint(0); i < wp.concurrency; i++ {
 		w := newWorker(
 			wp.namespace,
@@ -130,6 +138,7 @@ func NewWorkerPool(ctx interface{}, concurrency uint, namespace string, pool Poo
 			nil,
 			wp.jobTypes,
 			wp.logger,
+			wp.watchdog.processedJobs,
 		)
 		wp.workers = append(wp.workers, w)
 	}
@@ -211,17 +220,26 @@ func (wp *WorkerPool) JobWithOptions(name string, jobOpts JobOptions, fn interfa
 	return wp
 }
 
+func newPeriodicJob(spec string, jobName string) (*periodicJob, error) {
+	schedule, err := cron.NewParser(cronFormat).Parse(spec)
+	if err != nil {
+		return nil, err
+	}
+
+	return &periodicJob{jobName: jobName, spec: spec, schedule: schedule}, nil
+}
+
 // PeriodicallyEnqueue will periodically enqueue jobName according to the cron-based spec.
 // The spec format is based on github.com/robfig/cron/v3, which is a relatively standard cron format.
 // Note that the first value can be seconds!
 // If you have multiple worker pools on different machines, they'll all coordinate and only enqueue your job once.
 func (wp *WorkerPool) PeriodicallyEnqueue(spec string, jobName string) *WorkerPool {
-	schedule, err := cron.NewParser(cronFormat).Parse(spec)
+	j, err := newPeriodicJob(spec, jobName)
 	if err != nil {
 		panic(err)
 	}
 
-	wp.periodicJobs = append(wp.periodicJobs, &periodicJob{jobName: jobName, spec: spec, schedule: schedule})
+	wp.periodicJobs = append(wp.periodicJobs, j)
 
 	return wp
 }
@@ -259,6 +277,13 @@ func (wp *WorkerPool) Start() {
 		wp.logger,
 	)
 	wp.periodicEnqueuer.start()
+
+	wp.watchdog.addPeriodicJobs(wp.periodicJobs...)
+	wp.watchdog.start()
+}
+
+func (wp *WorkerPool) WatchdogStats() []WatchdogStat {
+	return wp.watchdog.stats()
 }
 
 // Stop stops the workers and associated processes.
@@ -282,6 +307,7 @@ func (wp *WorkerPool) Stop() {
 	wp.scheduler.stop()
 	wp.deadPoolReaper.stop()
 	wp.periodicEnqueuer.stop()
+	wp.watchdog.stop()
 }
 
 // Drain drains all jobs in the queue before returning. Note that if jobs are added faster than we can process them, this function wouldn't return.
@@ -341,6 +367,7 @@ func (wp *WorkerPool) writeKnownJobsToRedis() {
 		jobNames = append(jobNames, k)
 	}
 
+	wp.logger.Debug("write_known_jobs", slog.Any("job_names", jobNames))
 	if _, err := conn.Do("SADD", jobNames...); err != nil {
 		wp.logger.Error("write_known_jobs", errAttr(err))
 	}
@@ -594,5 +621,13 @@ func WithReaperHook(h ReaperHook) WorkerPoolOption {
 func WithLogger(l StructuredLogger) WorkerPoolOption {
 	return func(wp *WorkerPool) {
 		wp.logger = l
+	}
+}
+
+// WithWatchdogFailCheckingTimeout defines the watchdog checking timeout
+// that marks task as failed (default WatchdogFailCheckingTimeout).
+func WithWatchdogFailCheckingTimeout(p time.Duration) WorkerPoolOption {
+	return func(wp *WorkerPool) {
+		wp.watchdogFailCheckingTimeout = p
 	}
 }
