@@ -122,7 +122,7 @@ func (pe *periodicEnqueuer) enqueue() error {
 			}
 
 			pe.logger.Debug("periodic_enqueuer.enqueue",
-				slog.Any("job_scheduled_time", t),
+				slog.Time("job_scheduled_time", t),
 				slog.String("job_name", pj.jobName),
 				slog.String("job_id", id),
 			)
