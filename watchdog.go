@@ -47,10 +47,9 @@ func watchdogWithFailCheckingTimeout(t time.Duration) watchdogOption {
 
 func newWatchdog(opts ...watchdogOption) *watchdog {
 	w := &watchdog{
-		failCheckingTimeout: WatchdogFailCheckingTimeout,
-		jobs:                make(map[string]*watchdogJob),
-		processedJobs:       make(chan *Job, processedJobsBuffer),
-		stopChan:            make(chan struct{}),
+		jobs:          make(map[string]*watchdogJob),
+		processedJobs: make(chan *Job, processedJobsBuffer),
+		stopChan:      make(chan struct{}),
 	}
 
 	for _, opt := range opts {
