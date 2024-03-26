@@ -63,7 +63,7 @@ func TestWorkerBasics(t *testing.T) {
 	_, err = enqueuer.Enqueue(job3, Q{"a": 3})
 	assert.Nil(t, err)
 
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 	w.drain()
 	w.stop()
@@ -113,7 +113,7 @@ func TestWorkerInProgress(t *testing.T) {
 	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
 	assert.Nil(t, err)
 
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 
 	// instead of w.forceIter(), we'll wait for 10 milliseconds to let the job start
@@ -164,7 +164,7 @@ func TestWorkerRetry(t *testing.T) {
 	enqueuer := NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
 	assert.Nil(t, err)
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 	w.drain()
 	w.stop()
@@ -216,7 +216,7 @@ func TestWorkerRetryWithCustomBackoff(t *testing.T) {
 	enqueuer := NewEnqueuer(ns, pool)
 	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
 	assert.Nil(t, err)
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 	w.drain()
 	w.stop()
@@ -273,7 +273,7 @@ func TestWorkerDead(t *testing.T) {
 	assert.Nil(t, err)
 	_, err = enqueuer.Enqueue(job2, nil)
 	assert.Nil(t, err)
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 	w.drain()
 	w.stop()
@@ -326,7 +326,7 @@ func TestWorkersPaused(t *testing.T) {
 	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
 	assert.Nil(t, err)
 
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	// pause the jobs prior to starting
 	err = pauseJobs(ns, job1, pool)
 	assert.Nil(t, err)
@@ -668,7 +668,7 @@ func TestWorkerRetryRemoveFromInProgress(t *testing.T) {
 	_, err := enqueuer.Enqueue(job1, Q{"a": 1})
 	assert.Nil(t, err)
 
-	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger)
+	w := newWorker(ns, "1", pool, tstCtxType, nil, jobTypes, noopLogger, nil)
 	w.start()
 	defer w.stop()
 

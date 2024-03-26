@@ -20,13 +20,14 @@ var sleepBackoffs = []time.Duration{
 }
 
 type worker struct {
-	workerID    string
-	poolID      string
-	namespace   string
-	pool        Pool
-	jobTypes    map[string]*jobType
-	middleware  []*middlewareHandler
-	contextType reflect.Type
+	workerID      string
+	poolID        string
+	namespace     string
+	pool          Pool
+	jobTypes      map[string]*jobType
+	middleware    []*middlewareHandler
+	contextType   reflect.Type
+	processedJobs chan<- *Job
 
 	redisFetchScript *redis.Script
 	sampler          prioritySampler
@@ -54,16 +55,18 @@ func newWorker(
 	middleware []*middlewareHandler,
 	jobTypes map[string]*jobType,
 	logger StructuredLogger,
+	processedJobs chan<- *Job,
 ) *worker {
 	workerID := makeIdentifier()
 	ob := newObserver(namespace, pool, workerID, logger)
 
 	w := &worker{
-		workerID:    workerID,
-		poolID:      poolID,
-		namespace:   namespace,
-		pool:        pool,
-		contextType: contextType,
+		workerID:      workerID,
+		poolID:        poolID,
+		namespace:     namespace,
+		pool:          pool,
+		contextType:   contextType,
+		processedJobs: processedJobs,
 
 		observer: ob,
 
@@ -139,6 +142,9 @@ func (w *worker) loop() {
 				w.logger.Error("worker.fetch", errAttr(err))
 				timer.Reset(10 * time.Millisecond)
 			} else if job != nil {
+				if w.processedJobs != nil {
+					w.processedJobs <- job
+				}
 				w.processJob(job)
 				consequtiveNoJobs = 0
 				timer.Reset(0)
