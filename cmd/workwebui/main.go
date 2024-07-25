@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gomodule/redigo/redis"
-	"github.com/sbermarket-tech/work/webui"
+	"github.com/kuper-tech/work/webui"
 )
 
 var (

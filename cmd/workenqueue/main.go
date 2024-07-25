@@ -7,8 +7,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/sbermarket-tech/work"
 	"github.com/gomodule/redigo/redis"
+	"github.com/kuper-tech/work"
 )
 
 var redisHostPort = flag.String("redis", ":6379", "redis hostport")
