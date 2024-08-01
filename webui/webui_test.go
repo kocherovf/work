@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/sbermarket-tech/work"
 	"github.com/gomodule/redigo/redis"
+	"github.com/kuper-tech/work"
 	"github.com/stretchr/testify/assert"
 )
 

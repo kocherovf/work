@@ -9,8 +9,8 @@ import (
 
 	"github.com/braintree/manners"
 	"github.com/gocraft/web"
-	"github.com/sbermarket-tech/work"
-	"github.com/sbermarket-tech/work/webui/internal/assets"
+	"github.com/kuper-tech/work"
+	"github.com/kuper-tech/work/webui/internal/assets"
 )
 
 // Server implements an HTTP server which exposes a JSON API to view and manage gocraft/work items.

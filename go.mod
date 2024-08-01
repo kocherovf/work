@@ -1,4 +1,4 @@
-module github.com/sbermarket-tech/work
+module github.com/kuper-tech/work
 
 go 1.21
 

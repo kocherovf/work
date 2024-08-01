@@ -1,8 +1,8 @@
-module github.com/sbermarket-tech/work/benches
+module github.com/kuper-tech/work/benches
 
 go 1.21
 
-replace github.com/sbermarket-tech/work => ../
+replace github.com/kuper-tech/work => ../
 
 require (
 	github.com/albrow/jobs v0.4.2
@@ -10,7 +10,7 @@ require (
 	github.com/gocraft/health v0.0.0-20170925182251-8675af27fef0
 	github.com/gomodule/redigo v1.8.8
 	github.com/jrallison/go-workers v0.0.0-20180112190529-dbf81d0b75bb
-	github.com/sbermarket-tech/work v0.0.0-00010101000000-000000000000
+	github.com/kuper-tech/work v0.0.0-00010101000000-000000000000
 )
 
 require (

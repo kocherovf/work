@@ -23,7 +23,7 @@ import (
 	"context"
 
 	"github.com/gomodule/redigo/redis"
-	"github.com/sbermarket-tech/work"
+	"github.com/kuper-tech/work"
 )
 
 // Make a redis pool
@@ -64,7 +64,7 @@ import (
 	"os/signal"
 
 	"github.com/gomodule/redigo/redis"
-	"github.com/sbermarket-tech/work"
+	"github.com/kuper-tech/work"
 )
 
 // Make a redis pool
