@@ -74,13 +74,51 @@ func (e *Enqueuer) EnqueueContext(ctx context.Context, jobName string, args Q) (
 	return job, nil
 }
 
+// EnqueueBatchContext will enqueue the specified job name and arguments. The args param can be nil if no args ar needed.
+// Example: e.Enqueue("send_email", []work.Q{{"addr": "test@example.com"}})
+func (e *Enqueuer) EnqueueBatchContext(ctx context.Context, jobName string, argsList []Q) ([]*Job, error) {
+	jobs := make([]*Job, 0, len(argsList))
+	redisArgs := make([]any, 0, len(argsList)+1)
+	redisArgs = append(redisArgs, e.queuePrefix+jobName)
+	for _, args := range argsList {
+		job := &Job{
+			Name:       jobName,
+			ID:         makeIdentifier(),
+			EnqueuedAt: nowEpochSeconds(),
+			Args:       args,
+		}
+		jobs = append(jobs, job)
+		job.injectTraceContext(ctx)
+
+		rawJSON, err := job.serialize()
+		if err != nil {
+			return nil, err
+		}
+		redisArgs = append(redisArgs, rawJSON)
+	}
+
+	conn := e.Pool.Get()
+	defer conn.Close()
+
+	if _, err := conn.Do("LPUSH", redisArgs...); err != nil {
+		return nil, err
+	}
+
+	if err := e.addToKnownJobs(conn, jobName); err != nil {
+		return jobs, err
+	}
+
+	return jobs, nil
+}
+
 // EnqueueIn enqueues a job in the scheduled job queue for execution in secondsFromNow seconds.
 func (e *Enqueuer) EnqueueIn(jobName string, secondsFromNow int64, args map[string]interface{}) (*ScheduledJob, error) {
 	return e.EnqueueContextIn(context.Background(), jobName, secondsFromNow, args)
 }
 
 // EnqueueContextIn enqueues a job in the scheduled job queue for execution in secondsFromNow seconds.
-func (e *Enqueuer) EnqueueContextIn(ctx context.Context, jobName string, secondsFromNow int64, args Q) (*ScheduledJob, error) {
+func (e *Enqueuer) EnqueueContextIn(ctx context.Context, jobName string, secondsFromNow int64, args Q) (*ScheduledJob,
+	error) {
 	job := &Job{
 		Name:       jobName,
 		ID:         makeIdentifier(),
@@ -173,7 +211,8 @@ func (e *Enqueuer) EnqueueUniqueIn(jobName string, secondsFromNow int64, args Q)
 }
 
 // // EnqueueContextUniqueIn does the same as EnqueueUniqueIn with context propagation.
-func (e *Enqueuer) EnqueueContextUniqueIn(ctx context.Context, jobName string, secondsFromNow int64, args Q) (*ScheduledJob, error) {
+func (e *Enqueuer) EnqueueContextUniqueIn(ctx context.Context, jobName string, secondsFromNow int64,
+	args Q) (*ScheduledJob, error) {
 	uniqueKey, err := redisKeyUniqueJob(e.Namespace, jobName, args)
 	if err != nil {
 		return nil, err

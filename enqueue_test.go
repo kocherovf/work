@@ -77,6 +77,33 @@ func TestEnqueueContext(t *testing.T) {
 	assert.Equal(t, j.TraceContext, job.TraceContext)
 }
 
+func TestEnqueueBatchContext(t *testing.T) {
+	pool := newTestPool(":6379")
+	ns := "work"
+	jobName := "myjob"
+	cleanKeyspace(ns, pool)
+
+	exp := tracetest.NewInMemoryExporter()
+	tp := trace.NewTracerProvider(trace.WithSyncer(exp))
+
+	ctx, span := tp.Tracer("").Start(context.Background(), "test trace")
+	span.End()
+
+	enqueuer := NewEnqueuer(ns, pool)
+
+	js, err := enqueuer.EnqueueBatchContext(ctx, jobName, []Q{{"asdf": "1"}, {"asdf": "2"}})
+	require.NoError(t, err)
+
+	require.Len(t, js, 2)
+	assert.NotNil(t, js[0].TraceContext)
+	assert.NotNil(t, js[1].TraceContext)
+
+	job := jobOnQueue(pool, redisKeyJobs(ns, jobName))
+	assert.Equal(t, js[0].TraceContext, job.TraceContext)
+	job = jobOnQueue(pool, redisKeyJobs(ns, jobName))
+	assert.Equal(t, js[1].TraceContext, job.TraceContext)
+}
+
 func TestEnqueueIn(t *testing.T) {
 	pool := newTestPool(":6379")
 	ns := "work"
